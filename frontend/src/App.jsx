@@ -18,17 +18,37 @@ const MASS_SECTIONS = [
   'Recessional',
 ]
 
-// The public URL of your master PPTX template stored in Supabase Storage (or any CDN).
-// Replace this with your actual template URL.
+// Maps each UI section name to the category string stored in Supabase.
+// Adjust the values here if your `categories` column uses different spellings.
+const SECTION_TO_CATEGORY = {
+  'Entrance':       'entrance',
+  'Lord Have Mercy':'lord have mercy',
+  'Gloria':         'gloria',
+  'Acclamation':    'acclamation',
+  'Offertory':      'offertory',
+  'Holy Holy':      'holy holy',
+  'Proclamation':   'proclamation',
+  'Communion':      'communion',
+  'Recessional':    'recessional',
+}
+
+/**
+ * Returns the hymns that belong to a given Mass section.
+ * Comparison is case-insensitive so "Lord have Mercy" matches "Lord Have Mercy".
+ */
+const filterHymnsForSection = (hymns, sectionName) => {
+  const target = SECTION_TO_CATEGORY[sectionName] ?? sectionName.toLowerCase()
+  return hymns.filter(h => (h.categories ?? '').toLowerCase() === target)
+}
+
 const TEMPLATE_URL =
   import.meta.env.VITE_TEMPLATE_URL ||
   'https://YOUR_PROJECT.supabase.co/storage/v1/object/public/templates/master.pptx'
 
-// Backend API endpoint (proxied via Vite in dev; absolute URL in production).
 const API_URL = import.meta.env.VITE_API_URL || '/api/generate-ppt'
 
 // ---------------------------------------------------------------------------
-// Icons (inline SVG – no extra dependency)
+// Icons (inline SVG)
 // ---------------------------------------------------------------------------
 
 const IconPresentation = () => (
@@ -85,65 +105,43 @@ const IconInfo = () => (
 // ---------------------------------------------------------------------------
 
 /**
- * Renders one Mass-part row: dropdown + dynamic verse checkboxes.
+ * Renders one Mass-part row: a hymn dropdown + dynamic verse checkboxes.
  *
  * Props:
- *   index      – 0-based section index
- *   name       – section name string
- *   hymns      – full hymns array from Supabase
- *   value      – currently selected hymn id (string | '')
- *   onChange   – (sectionName, hymnId, selectedVerses) => void
+ *   index          – 0-based section index
+ *   name           – section name string
+ *   hymns          – full hymns array already fetched from Supabase
+ *   hymnId         – currently selected hymn id (string | '')
+ *   selectedVerses – number[] of selected verse numbers
+ *   onChange       – (sectionName, hymnId, selectedVerses) => void
  */
-function SectionSelector({ index, name, hymns, value, selectedVerses, onChange }) {
-  const [verseCount, setVerseCount] = useState(0)
-  const [hasChorus, setHasChorus] = useState(false)
-  const [loadingVerses, setLoadingVerses] = useState(false)
+function SectionSelector({ index, name, hymns, hymnId, selectedVerses, onChange }) {
+  // Only show hymns that belong to this Mass section
+  const filteredHymns = filterHymnsForSection(hymns, name)
 
-  // When hymn changes, fetch verse_count + chorus info from Supabase
-  useEffect(() => {
-    if (!value) {
-      setVerseCount(0)
-      setHasChorus(false)
-      return
-    }
+  // Find the full hymn object from the already-fetched list — no extra DB call needed
+  const selectedHymn = hymns.find(h => String(h.id) === String(hymnId)) ?? null
 
-    let cancelled = false
-    setLoadingVerses(true)
-
-    supabase
-      .from('hymns')
-      .select('verse_count, has_chorus')
-      .eq('id', value)
-      .single()
-      .then(({ data, error }) => {
-        if (cancelled) return
-        setLoadingVerses(false)
-        if (error || !data) {
-          setVerseCount(0)
-          setHasChorus(false)
-          return
-        }
-        setVerseCount(data.verse_count ?? 0)
-        setHasChorus(data.has_chorus ?? false)
-        // Default: all verses selected
-        const allVerses = Array.from({ length: data.verse_count ?? 0 }, (_, i) => i + 1)
-        onChange(name, value, allVerses)
-      })
-
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value])
+  const verseCount = selectedHymn?.verse_count ?? 0
+  const hasChorus  = !!(selectedHymn?.chorus?.trim())
 
   const handleHymnChange = (e) => {
-    const hymnId = e.target.value
-    onChange(name, hymnId, [])   // verses reset; effect above will re-populate
+    const newId = e.target.value
+    if (!newId) {
+      onChange(name, '', [])
+      return
+    }
+    const hymn = hymns.find(h => String(h.id) === String(newId))
+    // Default: all verses selected
+    const allVerses = Array.from({ length: hymn?.verse_count ?? 0 }, (_, i) => i + 1)
+    onChange(name, newId, allVerses)
   }
 
   const handleVerseToggle = (verseNum) => {
     const next = selectedVerses.includes(verseNum)
       ? selectedVerses.filter(v => v !== verseNum)
       : [...selectedVerses, verseNum].sort((a, b) => a - b)
-    onChange(name, value, next)
+    onChange(name, hymnId, next)
   }
 
   return (
@@ -161,19 +159,20 @@ function SectionSelector({ index, name, hymns, value, selectedVerses, onChange }
           <select
             id={`section-${index}`}
             className="styled-select"
-            value={value}
+            value={hymnId}
             onChange={handleHymnChange}
           >
             <option value="">— Select a hymn —</option>
-            {hymns.map(h => (
-              <option key={h.id} value={h.id}>{h.title}</option>
-            ))}
+            {filteredHymns.length === 0
+              ? <option disabled value="">No hymns in this category yet</option>
+              : filteredHymns.map(h => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))
+            }
           </select>
 
-          {/* Verse checkboxes */}
-          {loadingVerses && <div className="skeleton" />}
-
-          {!loadingVerses && value && verseCount > 0 && (
+          {/* Verse checkboxes — rendered directly from fetched data */}
+          {hymnId && verseCount > 0 && (
             <div className="verse-boxes">
               {Array.from({ length: verseCount }, (_, i) => i + 1).map(num => (
                 <label
@@ -189,9 +188,7 @@ function SectionSelector({ index, name, hymns, value, selectedVerses, onChange }
                 </label>
               ))}
               {hasChorus && (
-                <span className="chorus-badge">
-                  ♪ Chorus included
-                </span>
+                <span className="chorus-badge">♪ Chorus included</span>
               )}
             </div>
           )}
@@ -207,14 +204,14 @@ function SectionSelector({ index, name, hymns, value, selectedVerses, onChange }
 
 export default function App() {
   // --- State ---
-  const [hymns, setHymns]           = useState([])
+  const [hymns, setHymns]             = useState([])
   const [hymnsLoading, setHymnsLoading] = useState(true)
-  const [hymnsError, setHymnsError]  = useState(null)
+  const [hymnsError, setHymnsError]   = useState(null)
 
   const [date, setDate] = useState(() => {
     // Default to next Sunday
     const today = new Date()
-    const day   = today.getDay()               // 0 = Sun
+    const day   = today.getDay()           // 0 = Sun
     const diff  = day === 0 ? 0 : 7 - day
     const next  = new Date(today)
     next.setDate(today.getDate() + diff)
@@ -227,18 +224,20 @@ export default function App() {
   )
 
   const [downloading, setDownloading] = useState(false)
-  const [statusMsg, setStatusMsg]     = useState(null) // { type: 'error'|'info', text: string }
+  const [statusMsg, setStatusMsg]     = useState(null) // { type: 'error'|'info', text }
 
-  // --- Fetch hymns on mount ---
+  // --- Fetch all hymns on mount ---
+  // Selects every column we need so SectionSelector never has to make extra queries.
   useEffect(() => {
     supabase
       .from('hymns')
-      .select('id, title, verse_count, has_chorus, lyrics')
-      .order('title', { ascending: true })
+      .select('id, name, categories, verse_count, chorus, verse_1, verse_2, verse_3, verse_4, verse_5')
+      .order('name', { ascending: true })
       .then(({ data, error }) => {
         setHymnsLoading(false)
         if (error) {
-          setHymnsError('Could not load hymns from database. Check your Supabase credentials.')
+          console.error('Supabase error:', error)
+          setHymnsError(`Could not load hymns: ${error.message}`)
           return
         }
         setHymns(data ?? [])
@@ -253,7 +252,7 @@ export default function App() {
     }))
   }, [])
 
-  // --- Build sections payload ---
+  // --- Build the sections payload for the backend ---
   const buildSectionsPayload = () => {
     return MASS_SECTIONS.map(sectionName => {
       const { hymnId, verses } = selections[sectionName]
@@ -261,34 +260,32 @@ export default function App() {
 
       if (!hymn) return { name: sectionName, song: { title: '', lyrics: [] } }
 
-      // Filter and order the lyrics based on selected verses + chorus
-      const rawLyrics = hymn.lyrics ?? []   // expected: [{ label, text }, ...]
-
-      // Separate chorus entries from verses
-      const chorusEntry = rawLyrics.find(l => l.label?.toLowerCase().includes('chorus'))
-
-      // Build ordered lyrics: selected verses interleaved with chorus placement
+      // Build ordered lyrics from flat verse columns + chorus column
       const selectedLyrics = []
+
       for (const verseNum of verses) {
-        const verseEntry = rawLyrics.find(l => {
-          const label = l.label?.toLowerCase() ?? ''
-          return label.includes(`verse ${verseNum}`) || label === `v${verseNum}`
-        })
-        if (verseEntry) selectedLyrics.push(verseEntry)
+        const text = hymn[`verse_${verseNum}`]
+        if (text?.trim()) {
+          selectedLyrics.push({ label: `Verse ${verseNum}`, text: text.trim() })
+        }
       }
-      if (chorusEntry) selectedLyrics.push(chorusEntry)
+
+      // Append chorus if it exists (backend appends it after each verse automatically)
+      if (hymn.chorus?.trim()) {
+        selectedLyrics.push({ label: 'Chorus', text: hymn.chorus.trim() })
+      }
 
       return {
         name: sectionName,
         song: {
-          title:  hymn.title,
+          title:  hymn.name,
           lyrics: selectedLyrics,
         },
       }
     })
   }
 
-  // --- Format date for display in PPT (e.g. "Sunday, 29 June 2026") ---
+  // --- Format date for PPT cover page ---
   const formatDate = (isoDate) => {
     const d = new Date(isoDate + 'T00:00:00')
     return d.toLocaleDateString('en-GB', {
@@ -319,7 +316,6 @@ export default function App() {
         throw new Error(err.error ?? `Server error ${response.status}`)
       }
 
-      // Trigger browser download
       const blob = await response.blob()
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
@@ -338,8 +334,8 @@ export default function App() {
     }
   }
 
-  // --- Validation ---
-  const canDownload = !downloading && date &&
+  // --- Validation: enable button if at least one section has a hymn selected ---
+  const canDownload = !downloading && !!date &&
     MASS_SECTIONS.some(s => selections[s].hymnId !== '')
 
   // ---------------------------------------------------------------------------
@@ -391,14 +387,16 @@ export default function App() {
         <p className="card-title"><IconMusic /> Hymn Selections</p>
 
         {hymnsLoading
-          ? Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton" style={{ marginBottom: '1rem' }} />)
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="skeleton" style={{ marginBottom: '1rem' }} />
+            ))
           : MASS_SECTIONS.map((name, index) => (
               <SectionSelector
                 key={name}
                 index={index}
                 name={name}
                 hymns={hymns}
-                value={selections[name].hymnId}
+                hymnId={selections[name].hymnId}
                 selectedVerses={selections[name].verses}
                 onChange={handleSelectionChange}
               />

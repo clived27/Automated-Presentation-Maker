@@ -40,173 +40,223 @@ Slide mapping:
 import copy
 import json
 import io
+import traceback
 from http.server import BaseHTTPRequestHandler
 
 import requests
 from pptx import Presentation
-from pptx.util import Pt
 from lxml import etree
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# XML namespace constant
+# ---------------------------------------------------------------------------
+_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+# ---------------------------------------------------------------------------
+# Helpers — text manipulation
 # ---------------------------------------------------------------------------
 
-def _replace_text_in_frame(text_frame, old: str, new: str) -> bool:
-    """
-    Replace *old* with *new* inside a text frame while preserving the
-    formatting of the first run that contains the placeholder.
-    Returns True if a replacement was made.
-    """
-    for para in text_frame.paragraphs:
-        for run in para.runs:
-            if old in run.text:
-                run.text = run.text.replace(old, new)
-                return True
-    return False
+def _para_full_text(para) -> str:
+    """Concatenate all run texts in a paragraph (handles split runs)."""
+    return "".join(run.text for run in para.runs)
 
 
 def _frame_contains(text_frame, placeholder: str) -> bool:
-    """Return True if *placeholder* appears anywhere in the text frame."""
+    """
+    Return True if *placeholder* appears anywhere in the text frame.
+    Checks the concatenated paragraph text to handle placeholders that
+    python-pptx has split across multiple runs.
+    """
     for para in text_frame.paragraphs:
-        for run in para.runs:
-            if placeholder in run.text:
-                return True
+        if placeholder in _para_full_text(para):
+            return True
     return False
+
+
+def _replace_in_para(para, old: str, new: str) -> bool:
+    """
+    Replace *old* with *new* within a single paragraph.
+    If the placeholder is split across runs, consolidates all run text
+    into the first run (preserving its formatting) and clears the rest.
+    Returns True if a replacement was made.
+    """
+    full = _para_full_text(para)
+    if old not in full:
+        return False
+
+    replaced = full.replace(old, new)
+    runs = para.runs
+    if runs:
+        runs[0].text = replaced
+        for run in runs[1:]:
+            run.text = ""
+    return True
+
+
+def _replace_text_in_frame(text_frame, old: str, new: str) -> bool:
+    """Replace *old* with *new* across all paragraphs in a text frame."""
+    replaced = False
+    for para in text_frame.paragraphs:
+        if _replace_in_para(para, old, new):
+            replaced = True
+    return replaced
 
 
 def _set_frame_text(text_frame, new_text: str):
     """
-    Replace the entire content of a text frame with *new_text*.
-    Multi-line input (split on \\n) creates separate paragraph elements so
-    that line breaks render correctly in PowerPoint.
-    Formatting (font name, size, bold, colour) is copied from the first
-    existing run.
+    Replace the entire content of *text_frame* with *new_text*.
+    Each \\n becomes a new paragraph, preserving the run properties
+    (font size, bold, colour, etc.) of the first run found in the frame.
     """
-    # Snapshot formatting from the first run (if available)
-    first_run = None
+    # Snapshot rPr (run properties) from the first non-empty run
+    saved_rPr = None
     for para in text_frame.paragraphs:
         for run in para.runs:
-            first_run = run
+            rPr_el = run._r.find(f"{{{_NS}}}rPr")
+            if rPr_el is not None:
+                saved_rPr = copy.deepcopy(rPr_el)
             break
-        if first_run:
+        if saved_rPr is not None:
             break
 
-    # Clear existing paragraphs by removing all <a:p> children from the txBody
+    # Work directly on the txBody XML element
     txBody = text_frame._txBody
-    for p_elem in txBody.findall(
-        ".//{http://schemas.openxmlformats.org/drawingml/2006/main}p"
-    ):
-        txBody.remove(p_elem)
 
-    lines = new_text.split("\n")
-    NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    # Remove every existing <a:p> element
+    for p_el in txBody.findall(f"{{{_NS}}}p"):
+        txBody.remove(p_el)
 
-    for line in lines:
-        p_elem = etree.SubElement(txBody, f"{{{NS}}}p")
-        r_elem = etree.SubElement(p_elem, f"{{{NS}}}r")
+    # Re-build one <a:p> per line
+    for line in new_text.split("\n"):
+        p_el = etree.SubElement(txBody, f"{{{_NS}}}p")
+        r_el = etree.SubElement(p_el, f"{{{_NS}}}r")
 
-        # Copy run properties from first_run if we have them
-        if first_run is not None and first_run._r.find(f"{{{NS}}}rPr") is not None:
-            rPr = copy.deepcopy(first_run._r.find(f"{{{NS}}}rPr"))
-            r_elem.insert(0, rPr)
+        if saved_rPr is not None:
+            r_el.insert(0, copy.deepcopy(saved_rPr))
 
-        t_elem = etree.SubElement(r_elem, f"{{{NS}}}t")
-        t_elem.text = line
+        t_el = etree.SubElement(r_el, f"{{{_NS}}}t")
+        t_el.text = line
 
+
+# ---------------------------------------------------------------------------
+# Safe slide duplication
+# ---------------------------------------------------------------------------
 
 def _duplicate_slide(prs: Presentation, slide_index: int):
     """
-    Duplicate the slide at *slide_index* and insert it immediately after.
-    Returns the new (duplicate) slide object.
+    Safely duplicate the slide at *slide_index* and insert the copy
+    immediately after it.
+
+    Strategy:
+      1. Add a fresh slide using the *same layout* as the template slide.
+         python-pptx registers it properly (relationships, rIds, etc.).
+      2. Copy the shapes from the template slide's spTree into the new slide's
+         spTree using lxml deep-copy (copies XML nodes, not python-pptx
+         wrapper objects — avoids broken internal references).
+      3. Reposition the new sldId entry in the presentation's sldIdLst so the
+         slide sits immediately after the original.
+
+    Returns the new slide object (already at slide_index + 1).
     """
     template_slide = prs.slides[slide_index]
-    slide_layout = template_slide.slide_layout
+    layout = template_slide.slide_layout
 
-    # Add a blank new slide using the same layout
-    new_slide = prs.slides.add_slide(slide_layout)
+    # Step 1: Add a properly initialised slide at the end of the deck
+    new_slide = prs.slides.add_slide(layout)
 
-    # Deep-copy the XML tree from the template slide into the new slide
-    new_slide._element.spTree.clear()
-    for child in template_slide._element.spTree:
-        new_slide._element.spTree.append(copy.deepcopy(child))
+    # Step 2: Replace the new slide's shape tree with a copy of the template's
+    src_spTree = template_slide.shapes._spTree
+    dst_spTree = new_slide.shapes._spTree
 
-    # Move the new slide to immediately after the template slide in the XML
-    xml_slides = prs.slides._sldIdLst
-    # The new slide was appended at the end — move it to slide_index + 1
-    new_slide_elem = xml_slides[-1]
-    xml_slides.remove(new_slide_elem)
-    xml_slides.insert(slide_index + 1, new_slide_elem)
+    # Remove everything currently in the destination spTree
+    for child in list(dst_spTree):
+        dst_spTree.remove(child)
+
+    # Deep-copy each child XML node from source to destination.
+    # We copy the lxml elements directly (not python-pptx objects), which is
+    # safe because lxml elements carry no back-references to the presentation.
+    for child in src_spTree:
+        dst_spTree.append(copy.deepcopy(child))
+
+    # Step 3: Move the new slide's sldId entry to slide_index + 1
+    sldIdLst = prs.slides._sldIdLst
+    new_sldId = sldIdLst[-1]          # add_slide always appends at the end
+    sldIdLst.remove(new_sldId)
+    sldIdLst.insert(slide_index + 1, new_sldId)
 
     return prs.slides[slide_index + 1]
 
 
+# ---------------------------------------------------------------------------
+# Section slide filling
+# ---------------------------------------------------------------------------
+
 def _fill_section_slide(prs: Presentation, slide_index: int, song: dict):
     """
-    Fill a single Mass-section slide (and duplicate it as needed).
+    Fill a Mass-section slide and duplicate it for additional verses.
 
-    *song* is expected to have a "lyrics" key: a list of dicts, each with
-    "label" and "text".  Labels containing "chorus" (case-insensitive) are
-    treated as the chorus and appended after every verse.
+    Lyrics list format: [{ "label": "Verse 1", "text": "..." }, ...]
+    Items whose label contains "chorus" are treated as the shared chorus
+    and appended (with a blank line) after every verse on each slide.
 
-    The first verse replaces {{LYRICS}} on the original slide.
-    Each additional verse gets a duplicated slide.
+    Verse 1  → fills the original template slide
+    Verse 2+ → each gets a fresh duplicate of the template slide
     """
     lyrics = song.get("lyrics", [])
+
+    # Clear placeholder and return early if no lyrics provided
     if not lyrics:
-        # Nothing to fill — just clear the placeholder
         slide = prs.slides[slide_index]
         for shape in slide.shapes:
             if shape.has_text_frame and _frame_contains(shape.text_frame, "{{LYRICS}}"):
                 _replace_text_in_frame(shape.text_frame, "{{LYRICS}}", "")
         return
 
-    # Separate verses and chorus
+    # Split into verses and chorus
     chorus_text = ""
     verses = []
     for item in lyrics:
         label = item.get("label", "").lower()
-        text  = item.get("text", "")
+        text  = item.get("text", "").strip()
         if "chorus" in label:
             chorus_text = text
-        else:
+        elif text:
             verses.append(text)
 
-    # If there are no explicit verses (only a chorus), treat the chorus as the
-    # sole "verse" so we still fill the slide.
-    if not verses:
+    # Edge case: only a chorus was provided
+    if not verses and chorus_text:
         verses = [chorus_text]
         chorus_text = ""
 
-    def _build_slide_text(verse_text: str) -> str:
-        if chorus_text:
-            return verse_text + "\n\n" + chorus_text
-        return verse_text
+    def _build_text(verse_text: str) -> str:
+        return f"{verse_text}\n\n{chorus_text}" if chorus_text else verse_text
 
-    # --- Fill the original slide with Verse 1 ---
+    # --- Verse 1 → original slide ---
     original_slide = prs.slides[slide_index]
     for shape in original_slide.shapes:
         if shape.has_text_frame and _frame_contains(shape.text_frame, "{{LYRICS}}"):
-            _set_frame_text(shape.text_frame, _build_slide_text(verses[0]))
+            _set_frame_text(shape.text_frame, _build_text(verses[0]))
             break
 
-    # --- Duplicate slide for each additional verse ---
-    for i, verse_text in enumerate(verses[1:], start=1):
-        # After each duplication the new slide is at slide_index + i
-        _duplicate_slide(prs, slide_index + i - 1)
-        dup_slide = prs.slides[slide_index + i]
+    # --- Verses 2+ → duplicated slides ---
+    for extra_idx, verse_text in enumerate(verses[1:], start=1):
+        # Duplicate the slide that is now at (slide_index + extra_idx - 1)
+        # so the new copy lands at (slide_index + extra_idx)
+        _duplicate_slide(prs, slide_index + extra_idx - 1)
+        dup_slide = prs.slides[slide_index + extra_idx]
 
         for shape in dup_slide.shapes:
             if shape.has_text_frame and _frame_contains(shape.text_frame, "{{LYRICS}}"):
-                _set_frame_text(shape.text_frame, _build_slide_text(verse_text))
+                _set_frame_text(shape.text_frame, _build_text(verse_text))
                 break
 
 
 # ---------------------------------------------------------------------------
-# Core generation function
+# Core generation
 # ---------------------------------------------------------------------------
 
-# Ordered list of section names matching slides 1-9 (0-indexed: 1 to 9)
 SECTION_ORDER = [
     "Entrance",
     "Lord Have Mercy",
@@ -222,51 +272,40 @@ SECTION_ORDER = [
 
 def generate_presentation(template_url: str, date: str, sections: list) -> io.BytesIO:
     """
-    Download *template_url*, fill placeholders, and return the finished
-    presentation as a BytesIO buffer.
+    Download the PPTX template from *template_url*, fill all placeholders,
+    and return the finished presentation as an in-memory BytesIO buffer.
     """
-    # 1. Download template into memory
-    response = requests.get(template_url, timeout=30)
-    response.raise_for_status()
-    template_bytes = io.BytesIO(response.content)
+    # 1. Download template entirely into memory — no temp files
+    resp = requests.get(template_url, timeout=30)
+    resp.raise_for_status()
+    template_bytes = io.BytesIO(resp.content)
 
-    # 2. Open the presentation
+    # 2. Open presentation
     prs = Presentation(template_bytes)
 
-    # 3. Fill Cover Page — Slide 0: replace {{DATE}}
-    cover_slide = prs.slides[0]
-    for shape in cover_slide.shapes:
+    # 3. Cover page — replace {{DATE}} on slide 0
+    cover = prs.slides[0]
+    for shape in cover.shapes:
         if shape.has_text_frame:
             _replace_text_in_frame(shape.text_frame, "{{DATE}}", date)
 
-    # 4. Build a lookup: section name → song dict (case-insensitive)
-    section_map = {}
-    for section in sections:
-        name = section.get("name", "").strip()
-        section_map[name.lower()] = section.get("song", {})
+    # 4. Build section name → song lookup (case-insensitive keys)
+    section_map = {
+        s.get("name", "").strip().lower(): s.get("song", {})
+        for s in sections
+    }
 
-    # 5. Fill each Mass-section slide.
-    #    We must process slides in REVERSE order when duplicating so that
-    #    earlier slide indices are not shifted before we process them.
-    #    Instead, we process forward and track the current index offset
-    #    caused by any inserted duplicate slides.
-    slide_offset = 0  # grows whenever we add duplicate slides
-
+    # 5. Fill each Mass-section slide, tracking index offset from duplications
+    slide_offset = 0
     for section_idx, section_name in enumerate(SECTION_ORDER):
-        # The base slide index in the ORIGINAL template (1-9) + any offset
-        # introduced by previously duplicated slides.
-        current_slide_index = 1 + section_idx + slide_offset
-
+        current_index = 1 + section_idx + slide_offset
         song = section_map.get(section_name.lower(), {})
 
-        # Count slides before filling so we can calculate offset increase
-        slides_before = len(prs.slides)
-        _fill_section_slide(prs, current_slide_index, song)
-        slides_after = len(prs.slides)
+        before = len(prs.slides)
+        _fill_section_slide(prs, current_index, song)
+        slide_offset += len(prs.slides) - before
 
-        slide_offset += slides_after - slides_before
-
-    # 6. Save to a BytesIO buffer and return
+    # 6. Save to in-memory buffer and return
     output = io.BytesIO()
     prs.save(output)
     output.seek(0)
@@ -274,77 +313,107 @@ def generate_presentation(template_url: str, date: str, sections: list) -> io.By
 
 
 # ---------------------------------------------------------------------------
-# HTTP handler (works with Vercel / simple http.server)
+# HTTP handler — Vercel-compatible + local dev server
 # ---------------------------------------------------------------------------
 
 class handler(BaseHTTPRequestHandler):
     """
-    Minimal HTTP handler compatible with the Vercel Python runtime.
-    For local testing you can also run this file directly.
+    Handles POST /generate-ppt (or any path) for both Vercel serverless
+    deployment and local development (python generate-ppt.py).
     """
+
+    # Suppress default request log lines — we print our own
+    def log_message(self, fmt, *args):  # noqa: N802
+        print(f"[{self.client_address[0]}] {fmt % args}", flush=True)
+
+    def do_GET(self):  # noqa: N802
+        self._send_text(200, "generate-ppt is running. POST JSON to this endpoint.")
 
     def do_POST(self):  # noqa: N802
         content_length = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(content_length)
 
+        # Parse JSON
         try:
             body = json.loads(raw_body)
         except json.JSONDecodeError as exc:
-            self._send_error(400, f"Invalid JSON: {exc}")
+            self._send_json_error(400, f"Invalid JSON: {exc}")
             return
 
-        template_url = body.get("template_url")
+        template_url = body.get("template_url", "").strip()
         date         = body.get("date", "")
         sections     = body.get("sections", [])
 
         if not template_url:
-            self._send_error(400, "Missing required field: template_url")
+            self._send_json_error(400, "Missing required field: template_url")
             return
+
+        print(f"[generate-ppt] Generating for date='{date}', sections={len(sections)}", flush=True)
 
         try:
-            pptx_buffer = generate_presentation(template_url, date, sections)
+            pptx_buf = generate_presentation(template_url, date, sections)
         except requests.HTTPError as exc:
-            self._send_error(502, f"Failed to download template: {exc}")
+            msg = f"Failed to download template: {exc}"
+            print(f"[generate-ppt] ERROR: {msg}", flush=True)
+            self._send_json_error(502, msg)
             return
-        except Exception as exc:  # noqa: BLE001
-            self._send_error(500, f"Presentation generation failed: {exc}")
+        except Exception:
+            tb = traceback.format_exc()
+            print(f"[generate-ppt] TRACEBACK:\n{tb}", flush=True)
+            self._send_json_error(500, f"Presentation generation failed:\n{tb}")
             return
 
-        pptx_bytes = pptx_buffer.read()
+        pptx_bytes = pptx_buf.read()
+        print(f"[generate-ppt] Success — sending {len(pptx_bytes):,} bytes", flush=True)
 
         self.send_response(200)
         self.send_header(
             "Content-Type",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
-        self.send_header("Content-Disposition", 'attachment; filename="presentation.pptx"')
+        self.send_header("Content-Disposition", 'attachment; filename="Mass_Presentation.pptx"')
         self.send_header("Content-Length", str(len(pptx_bytes)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(pptx_bytes)
 
-    def do_GET(self):  # noqa: N802
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
+    def do_OPTIONS(self):  # noqa: N802
+        """Handle CORS preflight requests."""
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
-        self.wfile.write(b"generate-ppt is running. Send a POST request with JSON body.")
 
-    def _send_error(self, code: int, message: str):
+    def _send_json_error(self, code: int, message: str):
         body = json.dumps({"error": message}).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_text(self, code: int, message: str):
+        body = message.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
 
 # ---------------------------------------------------------------------------
-# Local dev server entry-point
+# Local dev entry-point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     from http.server import HTTPServer
 
     port = 8000
-    print(f"Starting local dev server on http://localhost:{port}")
+    print(f"[generate-ppt] Starting local dev server -> http://localhost:{port}", flush=True)
     server = HTTPServer(("", port), handler)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[generate-ppt] Shutting down.", flush=True)
