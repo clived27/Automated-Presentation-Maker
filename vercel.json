@@ -1,10 +1,13 @@
 {
-  "builds": [
-    { "src": "frontend/package.json", "use": "@vercel/static-build" },
-    { "src": "backend/api/*.py",      "use": "@vercel/python" }
-  ],
-  "rewrites": [
-    { "source": "/_/backend/(.*)", "destination": "backend/$1.py" },
-    { "source": "/(.*)",           "destination": "frontend/$1" }
-  ]
+  "experimentalServices": {
+    "frontend": {
+      "root": "frontend",
+      "routePrefix": "/",
+      "framework": "vite"
+    },
+    "backend": {
+      "root": "backend",
+      "routePrefix": "/_/backend"
+    }
+  }
 }
