@@ -39,13 +39,16 @@ Slide mapping (0-indexed):
 import copy
 import json
 import io
+import re
 import traceback
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs, unquote
 
 import requests
 from pptx import Presentation
-from pptx.util import Pt
+from pptx.util import Pt, Emu
 from lxml import etree
+from pypdf import PdfWriter, PdfReader
 
 
 # ---------------------------------------------------------------------------
@@ -138,61 +141,140 @@ def _snapshot_rPr(text_frame):
     return None
 
 
-def _set_frame_text(text_frame, verse_text: str, chorus_text: str = ""):
+def _parse_lines_with_bold(text: str, base_bold: bool = False) -> list[tuple[str, bool]]:
     """
-    Replace the entire content of *text_frame* with the supplied verse and
-    optional chorus.
+    Split *text* by ``**`` markers (which may span multiple lines) and return
+    a flat list of ``(line_text, is_bold)`` tuples.
 
-    Features:
-    - Normalises escaped \\n sequences into real newlines.
-    - Enables word-wrap on the text frame.
-    - Renders chorus lines in BOLD, separated from the verse by a blank line.
-    - Preserves the template's original run properties (font face, colour).
+    The split is applied to the ENTIRE block first so that::
+
+        **Chorus line 1
+        Chorus line 2**
+
+    produces TWO bold lines, not just the first.
+
+    *base_bold=True* makes every segment bold by default (used for
+    the separate chorus_text block).
     """
-    # 1. Normalise text
+    parts = re.split(r'\*\*', text, flags=re.DOTALL)
+    result: list[tuple[str, bool]] = []
+    for i, part in enumerate(parts):
+        if not part:          # skip empty strings (leading/trailing **)
+            continue
+        block_bold = base_bold or (i % 2 == 1)
+        for line in part.split('\n'):
+            result.append((line, block_bold))
+    return result
+
+
+def _make_rPr(saved_rPr, is_bold: bool, font_size_pt: int | None = None):
+    """
+    Return a fresh ``<a:rPr>`` lxml element.
+
+    Starts from a deep-copy of *saved_rPr* (the template's run properties)
+    so font face and colour are preserved.  Bold and optional font size are
+    applied on top.
+
+    *font_size_pt* is in points; OOXML stores it in 1/100 pt (``sz`` attr).
+    When *None*, the template's original size is kept.
+    """
+    if saved_rPr is not None:
+        rPr = copy.deepcopy(saved_rPr)
+    else:
+        rPr = etree.Element(f"{{{_NS}}}rPr")
+        rPr.set("lang", "en-US")
+        rPr.set("dirty", "0")
+    rPr.set("b", "1" if is_bold else "0")
+    if font_size_pt is not None:
+        rPr.set("sz", str(int(font_size_pt * 100)))   # e.g. 36pt → "3600"
+    return rPr
+
+
+def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
+    """
+    Replace the entire content of *shape*'s text frame with the supplied
+    verse and optional chorus, with:
+
+    * **Multi-line bold**: ``**...**`` delimiters are scanned across the
+      WHOLE text block first (not line-by-line), so a chorus that spans
+      several lines is correctly bolded throughout.
+    * **Smart font scaling**: font size steps down based on total character
+      count so long lyrics never overflow the text box.
+    * **Margin compression**: inner padding is tightened for long lyrics to
+      give the text box extra room.
+    * **Template fidelity**: font face and colour are preserved from the
+      template's first run.
+    """
+    text_frame = shape.text_frame
+
+    # 1. Normalise escaped \\n sequences
     verse_text  = _normalise(verse_text)
     chorus_text = _normalise(chorus_text) if chorus_text else ""
 
-    # 2. Enable word wrap so long lines don't escape the text box boundary
+    # 2. Compute total printable characters for font-size decision
+    combined    = verse_text + ("\n" + chorus_text if chorus_text else "")
+    total_chars = len(combined.replace("\n", ""))
+
+    # 3. Smart step-down font size (thresholds tuned by user testing)
+    #    < 258 chars  → 36 pt  (comfortable)
+    #    258–367      → 34 pt  (slightly denser)
+    #    368–369      → 32 pt  (boundary zone)
+    #    ≥ 370        → 28 pt  (dense slide)
+    if total_chars >= 370:
+        font_size = 28
+    elif total_chars >= 368:
+        font_size = 32
+    elif total_chars >= 258:
+        font_size = 34
+    else:
+        font_size = 36
+
+    # 4. Word wrap — required for all layouts
     text_frame.word_wrap = True
 
-    # 3. Snapshot the template run properties before clearing anything
+    # 5. Compress margins for long lyrics so text has more room
+    if total_chars > 300:
+        text_frame.margin_left   = Emu(45720)   # 0.05"
+        text_frame.margin_right  = Emu(45720)
+        text_frame.margin_top    = Emu(27432)   # 0.03"
+        text_frame.margin_bottom = Emu(27432)
+
+    # 6. Snapshot template run properties before clearing
     saved_rPr = _snapshot_rPr(text_frame)
 
-    # 4. Build a list of (line_text, is_bold) tuples
-    lines: list[tuple[str, bool]] = []
-    for line in verse_text.split("\n"):
-        lines.append((line, False))
+    # 7. Build flat list of (line_text, is_bold) by parsing ** blocks
+    #    across the entire text first (handles multi-line bold blocks)
+    lines: list[tuple[str, bool]] = _parse_lines_with_bold(verse_text, base_bold=False)
     if chorus_text:
-        lines.append(("", False))       # blank separator before chorus
-        for line in chorus_text.split("\n"):
-            lines.append((line, True))  # chorus lines → bold
+        lines.append(("", False))          # blank separator
+        lines.extend(_parse_lines_with_bold(chorus_text, base_bold=True))
 
-    # 5. Clear existing <a:p> elements from the txBody
+    # 8. Clear existing <a:p> elements
     txBody = text_frame._txBody
     for p_el in txBody.findall(f"{{{_NS}}}p"):
         txBody.remove(p_el)
 
-    # 6. Rebuild one <a:p> per line
-    for text, is_bold in lines:
+    # 9. Rebuild — one <a:p> per line
+    #    Each (non-empty) line may contain multiple <a:r> runs if it has
+    #    inline ** markers that weren't already consumed by block-level parsing.
+    for line_text, line_is_bold in lines:
         p_el = etree.SubElement(txBody, f"{{{_NS}}}p")
-        r_el = etree.SubElement(p_el, f"{{{_NS}}}r")
 
-        # Build <a:rPr> — start from snapshot or create fresh
-        if saved_rPr is not None:
-            rPr = copy.deepcopy(saved_rPr)
+        # Inline ** pass (handles cases like "Verse **word** more verse")
+        segments = _parse_lines_with_bold(line_text, base_bold=line_is_bold)
+
+        if not segments:
+            # Completely empty line — single empty run preserves the blank row
+            r_el = etree.SubElement(p_el, f"{{{_NS}}}r")
+            r_el.insert(0, _make_rPr(saved_rPr, line_is_bold, font_size))
+            t_el = etree.SubElement(r_el, f"{{{_NS}}}t")
+            t_el.text = ""
         else:
-            rPr = etree.Element(f"{{{_NS}}}rPr")
-            rPr.set("lang", "en-US")
-            rPr.set("dirty", "0")
-
-        # Apply bold for chorus lines (template font size preserved)
-        rPr.set("b", "1" if is_bold else "0")
-
-        r_el.insert(0, rPr)
-
-        t_el = etree.SubElement(r_el, f"{{{_NS}}}t")
-        t_el.text = text
+            for seg_text, seg_is_bold in segments:
+                r_el = etree.SubElement(p_el, f"{{{_NS}}}r")
+                r_el.insert(0, _make_rPr(saved_rPr, seg_is_bold, font_size))
+                t_el = etree.SubElement(r_el, f"{{{_NS}}}t")
+                t_el.text = seg_text
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +434,7 @@ def _fill_section_slide(prs: Presentation, slide_index: int, song: dict):
 
     # --- Fill Verse 1 on the original slide ---
     _set_frame_text(
-        shapes_list[lyrics_shape_idx].text_frame,
+        shapes_list[lyrics_shape_idx],
         verses[0],
         chorus_text,
     )
@@ -369,7 +451,7 @@ def _fill_section_slide(prs: Presentation, slide_index: int, song: dict):
         # Use the same shape index — no need to search for {{LYRICS}}
         if lyrics_shape_idx < len(dup_shapes):
             _set_frame_text(
-                dup_shapes[lyrics_shape_idx].text_frame,
+                dup_shapes[lyrics_shape_idx],
                 verse_text,
                 chorus_text,
             )
@@ -421,6 +503,109 @@ def generate_presentation(template_url: str, date: str, sections: list) -> io.By
 
 
 # ---------------------------------------------------------------------------
+# Chord PDF merging (server-side — bypasses all browser CORS/binary issues)
+# ---------------------------------------------------------------------------
+
+_DRIVE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/pdf,*/*;q=0.8",
+}
+
+
+def _drive_download_url(view_url: str) -> str:
+    """
+    Convert any Google Drive sharing / view URL to a direct download URL.
+    Supports:
+      https://drive.google.com/file/d/FILE_ID/view
+      https://drive.google.com/open?id=FILE_ID
+      https://drive.google.com/uc?id=FILE_ID  (already a download-ish URL)
+    """
+    import re
+    m = re.search(r'/d/([a-zA-Z0-9_-]+)', view_url)
+    if not m:
+        m = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', view_url)
+    if m:
+        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+    return view_url  # Not a Drive URL — pass through
+
+
+def _fetch_pdf_bytes(session: requests.Session, url: str) -> bytes:
+    """
+    Fetch PDF bytes from *url* using *session*, handling Google Drive's
+    virus-scan confirmation page automatically.
+    Raises ValueError if the final response is not a valid PDF.
+    """
+    resp = session.get(url, headers=_DRIVE_HEADERS, timeout=30, allow_redirects=True)
+    resp.raise_for_status()
+
+    # If Google returns HTML (virus-scan warning), extract confirm token and retry
+    if resp.content[:4] != b"%PDF":
+        confirm_token = "t"  # works for most small public files
+        for key, value in resp.cookies.items():
+            if "download_warning" in key.lower():
+                confirm_token = value
+                break
+        sep = "&" if "?" in url else "?"
+        confirmed = f"{url}{sep}confirm={confirm_token}"
+        print(f"[merge-chords] Retrying with confirm={confirm_token}", flush=True)
+        resp = session.get(confirmed, headers=_DRIVE_HEADERS, timeout=30, allow_redirects=True)
+        resp.raise_for_status()
+
+    if resp.content[:4] != b"%PDF":
+        snippet = resp.content[:120].decode("utf-8", errors="replace")
+        raise ValueError(
+            f"Response is not a PDF (starts with: {snippet!r}). "
+            "Make sure the file is shared as 'Anyone with the link can view'."
+        )
+
+    return resp.content
+
+
+def merge_chord_pdfs(sections: list) -> io.BytesIO:
+    """
+    Download every chord PDF in *sections* order and merge them into one PDF.
+
+    *sections* is a list of {"name": str, "url": str} dicts.
+    Returns an in-memory BytesIO buffer of the merged PDF.
+    Raises RuntimeError if no valid PDFs could be loaded.
+    """
+    writer = PdfWriter()
+    session = requests.Session()
+    errors = []
+
+    for entry in sections:
+        name = entry.get("name", "?")
+        raw_url = entry.get("url", "").strip()
+        if not raw_url:
+            continue
+        dl_url = _drive_download_url(raw_url)
+        print(f"[merge-chords] Fetching '{name}': {dl_url[:80]}", flush=True)
+        try:
+            pdf_bytes = _fetch_pdf_bytes(session, dl_url)
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            for page in reader.pages:
+                writer.add_page(page)
+            print(f"[merge-chords] '{name}' — {len(reader.pages)} page(s) added", flush=True)
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+            print(f"[merge-chords] SKIP '{name}': {exc}", flush=True)
+
+    if writer.get_num_pages() == 0:
+        raise RuntimeError(
+            "No chord PDFs could be loaded.\n" + "\n".join(errors)
+        )
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    buf.seek(0)
+    return buf
+
+
+# ---------------------------------------------------------------------------
 # HTTP handler — Vercel-compatible + local http.server
 # ---------------------------------------------------------------------------
 
@@ -436,11 +621,116 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):  # noqa: N802
-        self._send_text(200, "generate-ppt is running. POST JSON to this endpoint.")
+        parsed = urlparse(self.path)
+
+        if parsed.path in ("/proxy-pdf", "/api/proxy-pdf"):
+            self._handle_proxy_pdf(parse_qs(parsed.query))
+        else:
+            self._send_text(200, "generate-ppt is running. POST JSON to /generate-ppt.")
+
+    def _handle_proxy_pdf(self, params: dict):
+        """
+        Server-side PDF proxy: fetches a remote PDF URL and returns the bytes.
+        Sidesteps browser CORS restrictions; all Google Drive traffic is
+        server-to-server.
+
+        Handles Google Drive's virus-scan confirmation page by:
+          1. Making an initial request with a Session (captures cookies).
+          2. If the response is HTML and a 'download_warning' cookie exists,
+             re-requesting with confirm=t to bypass the interstitial.
+          3. Validating the %%PDF magic bytes before sending to the client.
+        """
+        raw_url = params.get("url", [""])[0].strip()
+        if not raw_url:
+            self._send_json_error(400, "Missing 'url' query parameter")
+            return
+
+        target_url = unquote(raw_url)
+        print(f"[proxy-pdf] Fetching: {target_url[:100]}", flush=True)
+
+        _HEADERS = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "application/pdf,*/*;q=0.8",
+        }
+
+        try:
+            session = requests.Session()
+
+            # --- First attempt ---
+            resp = session.get(
+                target_url, headers=_HEADERS, timeout=30, allow_redirects=True
+            )
+            resp.raise_for_status()
+
+            content_type = resp.headers.get("Content-Type", "")
+
+            # --- Handle Google Drive confirmation page ---
+            # For files > ~25 MB Google returns an HTML page with a warning cookie.
+            # We detect this either via Content-Type or by checking the magic bytes.
+            is_html = "text/html" in content_type
+            is_pdf_bytes = resp.content[:4] == b"%PDF"
+
+            if is_html or not is_pdf_bytes:
+                # Try to extract the confirmation token from cookies
+                confirm_token = None
+                for key, value in resp.cookies.items():
+                    if "download_warning" in key.lower():
+                        confirm_token = value
+                        break
+
+                if not confirm_token:
+                    # Fallback: try confirm=t which works for most public files
+                    confirm_token = "t"
+
+                sep = "&" if "?" in target_url else "?"
+                confirmed_url = f"{target_url}{sep}confirm={confirm_token}"
+                print(f"[proxy-pdf] Retrying with confirm token: {confirm_token}", flush=True)
+
+                resp = session.get(
+                    confirmed_url, headers=_HEADERS, timeout=30, allow_redirects=True
+                )
+                resp.raise_for_status()
+
+            # --- Final magic-byte validation ---
+            if resp.content[:4] != b"%PDF":
+                snippet = resp.content[:200].decode("utf-8", errors="replace")
+                print(f"[proxy-pdf] Non-PDF response snippet: {snippet}", flush=True)
+                self._send_json_error(
+                    502,
+                    "Google Drive did not return a PDF. "
+                    "Ensure the file is shared as 'Anyone with the link can view' "
+                    "and the chord_link column contains a valid Google Drive URL.",
+                )
+                return
+
+            data = resp.content
+            print(f"[proxy-pdf] OK — {len(data):,} bytes", flush=True)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", "inline")
+            self._cors_headers()
+            self.end_headers()
+            self.wfile.write(data)
+
+        except requests.HTTPError as exc:
+            msg = f"Remote server returned an error fetching the PDF: {exc}"
+            print(f"[proxy-pdf] ERROR: {msg}", flush=True)
+            self._send_json_error(502, msg)
+        except Exception:
+            tb = traceback.format_exc()
+            print(f"[proxy-pdf] TRACEBACK:\n{tb}", flush=True)
+            self._send_json_error(500, f"Proxy failed: {tb}")
+
 
     def do_POST(self):  # noqa: N802
-        length  = int(self.headers.get("Content-Length", 0))
-        raw     = self.rfile.read(length)
+        length = int(self.headers.get("Content-Length", 0))
+        raw    = self.rfile.read(length)
 
         try:
             body = json.loads(raw)
@@ -448,6 +738,14 @@ class handler(BaseHTTPRequestHandler):
             self._send_json_error(400, f"Invalid JSON: {exc}")
             return
 
+        # ---- Route by body content (immune to proxy path rewriting) --------
+        # merge-chords requests send { "sections": [{name, url}] } — no template_url
+        # generate-ppt requests always include template_url
+        if "template_url" not in body:
+            self._handle_merge_chords(body)
+            return
+
+        # ---- Default: generate PPT ----------------------------------------
         template_url = body.get("template_url", "").strip()
         date         = body.get("date", "")
         sections     = body.get("sections", [])
@@ -480,6 +778,41 @@ class handler(BaseHTTPRequestHandler):
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
         self.send_header("Content-Disposition", 'attachment; filename="Mass_Presentation.pptx"')
+        self.send_header("Content-Length", str(len(data)))
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(data)
+
+    # ------------------------------------------------------------------
+    def _handle_merge_chords(self, body: dict):
+        """
+        POST /merge-chords handler.
+        Accepts { "sections": [{"name": str, "url": str}, ...] },
+        downloads and merges all chord PDFs server-side using pypdf,
+        and returns the combined PDF binary.
+        """
+        sections = body.get("sections", [])
+        if not sections:
+            self._send_json_error(400, "No sections provided.")
+            return
+
+        print(f"[merge-chords] Merging {len(sections)} chord sheet(s)", flush=True)
+        try:
+            buf  = merge_chord_pdfs(sections)
+            data = buf.read()
+        except RuntimeError as exc:
+            self._send_json_error(502, str(exc))
+            return
+        except Exception:
+            tb = traceback.format_exc()
+            print(f"[merge-chords] TRACEBACK:\n{tb}", flush=True)
+            self._send_json_error(500, f"Chord merge failed:\n{tb}")
+            return
+
+        print(f"[merge-chords] Done — {len(data):,} bytes", flush=True)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Disposition", 'attachment; filename="Mass_Chords.pdf"')
         self.send_header("Content-Length", str(len(data)))
         self._cors_headers()
         self.end_headers()
