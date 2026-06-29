@@ -3,7 +3,6 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/generate-ppt.py": {
-      "runtime": "python3.12",
       "maxDuration": 60
     }
   },
