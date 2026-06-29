@@ -39,7 +39,8 @@ const TEMPLATE_URL =
   import.meta.env.VITE_TEMPLATE_URL ||
   'https://wvmxlnwfjtesbppojstu.supabase.co/storage/v1/object/public/templates/standard_template.pptx'
 
-const API_URL = import.meta.env.VITE_API_URL || '/api/generate-ppt'
+// Always use the standard Vercel api/ folder path — never rely on an env var for this.
+const API_URL = '/api/generate-ppt'
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons
