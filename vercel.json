@@ -1,7 +1,14 @@
 {
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/generate-ppt.py": {
+      "runtime": "python3.12",
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/:path*", "destination": "/api/:path*" },
+    { "source": "/(.*)",       "destination": "/index.html" }
   ]
 }

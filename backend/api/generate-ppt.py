@@ -42,6 +42,7 @@ import io
 import re
 import traceback
 from http.server import BaseHTTPRequestHandler
+from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
 
 import requests
@@ -167,7 +168,7 @@ def _parse_lines_with_bold(text: str, base_bold: bool = False) -> list[tuple[str
     return result
 
 
-def _make_rPr(saved_rPr, is_bold: bool, font_size_pt: int | None = None):
+def _make_rPr(saved_rPr, is_bold: bool, font_size_pt: Optional[int] = None):
     """
     Return a fresh ``<a:rPr>`` lxml element.
 
