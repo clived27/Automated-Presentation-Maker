@@ -37,7 +37,7 @@ const filterHymnsForSection = (hymns, sectionName) => {
 
 const TEMPLATE_URL =
   import.meta.env.VITE_TEMPLATE_URL ||
-  'https://YOUR_PROJECT.supabase.co/storage/v1/object/public/templates/master.pptx'
+  'https://wvmxlnwfjtesbppojstu.supabase.co/storage/v1/object/public/templates/standard_template.pptx'
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/generate-ppt'
 
