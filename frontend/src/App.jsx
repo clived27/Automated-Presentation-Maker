@@ -129,12 +129,17 @@ function SectionSelector({ index, name, hymns, hymnId, selectedVerses, onChange 
     onChange(name, hymnId, next)
   }
 
+  const isOptional = name.endsWith('2') || name.endsWith('3') || name.endsWith('4')
+
   return (
     <div className={`section-row ${hymnId ? 'section-row--active' : ''}`}>
       {/* Index badge + name */}
       <div className="section-meta">
         <span className="section-index">{String(index + 1).padStart(2, '0')}</span>
-        <span className="section-name">{name}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', marginTop: '-2px' }}>
+          <span className="section-name">{name}</span>
+          {isOptional && <span style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.2' }}>(Optional)</span>}
+        </div>
       </div>
 
       {/* Dropdown + verse chips */}
