@@ -7,27 +7,39 @@ import './App.css'
 // ---------------------------------------------------------------------------
 
 const MASS_SECTIONS = [
-  'Entrance',
+  'Entrance 1',
+  'Entrance 2',
   'Lord Have Mercy',
   'Gloria',
   'Acclamation',
-  'Offertory',
+  'Offertory 1',
+  'Offertory 2',
   'Holy Holy',
   'Proclamation',
-  'Communion',
-  'Recessional',
+  'Communion 1',
+  'Communion 2',
+  'Communion 3',
+  'Communion 4',
+  'Recessional 1',
+  'Recessional 2',
 ]
 
 const SECTION_TO_CATEGORY = {
-  'Entrance':       'entrance',
+  'Entrance 1':     'entrance',
+  'Entrance 2':     'entrance',
   'Lord Have Mercy':'lord have mercy',
   'Gloria':         'gloria',
   'Acclamation':    'acclamation',
-  'Offertory':      'offertory',
+  'Offertory 1':    'offertory',
+  'Offertory 2':    'offertory',
   'Holy Holy':      'holy holy',
   'Proclamation':   'proclamation',
-  'Communion':      'communion',
-  'Recessional':    'recessional',
+  'Communion 1':    'communion',
+  'Communion 2':    'communion',
+  'Communion 3':    'communion',
+  'Communion 4':    'communion',
+  'Recessional 1':  'recessional',
+  'Recessional 2':  'recessional',
 }
 
 const filterHymnsForSection = (hymns, sectionName) => {
@@ -214,6 +226,16 @@ export default function App() {
     setSelections(prev => ({ ...prev, [sectionName]: { hymnId, verses } }))
   }, [])
 
+  const isSectionVisible = (sectionName) => {
+    if (sectionName === 'Entrance 2')    return !!selections['Entrance 1']?.hymnId
+    if (sectionName === 'Offertory 2')   return !!selections['Offertory 1']?.hymnId
+    if (sectionName === 'Communion 4')   return !!selections['Communion 3']?.hymnId
+    if (sectionName === 'Recessional 2') return !!selections['Recessional 1']?.hymnId
+    return true
+  }
+
+  const visibleSections = MASS_SECTIONS.filter(isSectionVisible)
+
   const buildSectionsPayload = () =>
     MASS_SECTIONS.map(sectionName => {
       const { hymnId, verses } = selections[sectionName]
@@ -331,7 +353,7 @@ export default function App() {
                     <div className="skeleton skeleton--select" />
                   </div>
                 ))
-              : MASS_SECTIONS.map((name, index) => (
+              : visibleSections.map((name, index) => (
                   <SectionSelector
                     key={name}
                     index={index}

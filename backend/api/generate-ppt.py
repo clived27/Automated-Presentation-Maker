@@ -59,18 +59,24 @@ _NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 
 # ---------------------------------------------------------------------------
-# Section order (must match slide indices 1-9 in the template)
+# Section processing map (maps section name to the original template slide index 1-9)
 # ---------------------------------------------------------------------------
-SECTION_ORDER = [
-    "Entrance",
-    "Lord Have Mercy",
-    "Gloria",
-    "Acclamation",
-    "Offertory",
-    "Holy Holy",
-    "Proclamation",
-    "Communion",
-    "Recessional",
+SECTIONS_TO_PROCESS = [
+    ("Entrance 1", 1),
+    ("Entrance 2", 1),
+    ("Lord Have Mercy", 2),
+    ("Gloria", 3),
+    ("Acclamation", 4),
+    ("Offertory 1", 5),
+    ("Offertory 2", 5),
+    ("Holy Holy", 6),
+    ("Proclamation", 7),
+    ("Communion 1", 8),
+    ("Communion 2", 8),
+    ("Communion 3", 8),
+    ("Communion 4", 8),
+    ("Recessional 1", 9),
+    ("Recessional 2", 9),
 ]
 
 
@@ -290,12 +296,28 @@ _IMG_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 
+def _copy_blip_relationships(src_part, dst_part, xml_element):
+    """
+    Find all <a:blip r:embed="..."> in xml_element, and copy the relationships
+    from src_part to dst_part.
+    """
+    for blip in xml_element.findall(f".//{{{_NS}}}blip"):
+        old_rId = blip.get(f"{{{_R_NS}}}embed")
+        if old_rId:
+            try:
+                img_part = src_part.related_part(old_rId)
+                new_rId  = dst_part.relate_to(img_part, _IMG_REL)
+                blip.set(f"{{{_R_NS}}}embed", new_rId)
+            except Exception as exc:
+                print(f"[generate-ppt] Warning: could not copy blip rId {old_rId}: {exc}", flush=True)
+
+
 def _copy_background(src_slide, dst_slide):
     """
     Copy the explicit slide background (<p:bg>) from *src_slide* to
     *dst_slide*, including re-registering any embedded image relationships
     so the background image renders correctly on the new slide.
-
+    
     In OOXML, a slide's background lives inside <p:cSld><p:bg> — a sibling
     of <p:spTree> — so copying the shape tree alone silently drops it.
     """
@@ -308,19 +330,7 @@ def _copy_background(src_slide, dst_slide):
     new_bg = copy.deepcopy(src_bg)
 
     # Re-map every <a:blip r:embed="rIdX"/> reference.
-    # Each rId points to an image Part registered on the SOURCE slide's part.
-    # We must add the same image Part to the DESTINATION slide's part and
-    # update the rId in the copied XML to the new destination rId.
-    for blip in new_bg.findall(f".//{{{_NS}}}blip"):
-        old_rId = blip.get(f"{{{_R_NS}}}embed")
-        if old_rId:
-            try:
-                img_part = src_slide.part.related_part(old_rId)
-                new_rId  = dst_slide.part.relate_to(img_part, _IMG_REL)
-                blip.set(f"{{{_R_NS}}}embed", new_rId)
-            except Exception as exc:
-                print(f"[generate-ppt] Warning: could not copy bg image rId {old_rId}: {exc}",
-                      flush=True)
+    _copy_blip_relationships(src_slide.part, dst_slide.part, new_bg)
 
     # Insert / replace <p:bg> in the destination slide's <p:cSld>
     dst_cSld = dst_slide._element.find(f"{{{_PNS}}}cSld")
@@ -364,7 +374,9 @@ def _duplicate_slide(prs: Presentation, slide_index: int):
     for child in list(dst_spTree):
         dst_spTree.remove(child)
     for child in src_spTree:
-        dst_spTree.append(copy.deepcopy(child))
+        new_child = copy.deepcopy(child)
+        _copy_blip_relationships(src_slide.part, new_slide.part, new_child)
+        dst_spTree.append(new_child)
 
     # Step 3: Copy background image (the key fix — spTree copy skips <p:bg>)
     _copy_background(src_slide, new_slide)
@@ -486,15 +498,30 @@ def generate_presentation(template_url: str, date: str, sections: list) -> io.By
         for s in sections
     }
 
-    # 5. Fill each Mass-section slide, tracking index offset from duplications
-    slide_offset = 0
-    for section_idx, section_name in enumerate(SECTION_ORDER):
-        current_index = 1 + section_idx + slide_offset
-        song          = section_map.get(section_name.lower(), {})
-
-        before = len(prs.slides)
-        _fill_section_slide(prs, current_index, song)
-        slide_offset += len(prs.slides) - before
+    # 5. Fill each Mass-section slide (process in reverse to safely duplicate slides)
+    processed_bases = set()
+    for section_name, base_idx in reversed(SECTIONS_TO_PROCESS):
+        song = section_map.get(section_name.lower(), {})
+        
+        # The base slide itself is the last one processed for a given base_idx in reverse.
+        is_base = (base_idx not in processed_bases)
+        processed_bases.add(base_idx)
+        
+        if not is_base:
+            # It's an extra hymn (e.g. Communion 2, 3, 4).
+            # If no song is selected, just skip creating it.
+            if not song.get("lyrics"):
+                continue
+            
+            # Duplicate the base slide for this extra hymn.
+            # _duplicate_slide inserts immediately AFTER base_idx.
+            _duplicate_slide(prs, base_idx)
+            # The newly duplicated slide is at base_idx + 1. Fill it.
+            _fill_section_slide(prs, base_idx + 1, song)
+        else:
+            # It's the primary base slide (e.g. Communion 1).
+            # We always process it even if empty (to clear placeholders).
+            _fill_section_slide(prs, base_idx, song)
 
     # 6. Save to in-memory buffer
     output = io.BytesIO()
