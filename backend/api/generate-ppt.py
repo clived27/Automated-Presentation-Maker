@@ -499,27 +499,26 @@ def generate_presentation(template_url: str, date: str, sections: list) -> io.By
     }
 
     # 5. Fill each Mass-section slide (process in reverse to safely duplicate slides)
-    processed_bases = set()
     for section_name, base_idx in reversed(SECTIONS_TO_PROCESS):
         song = section_map.get(section_name.lower(), {})
         
-        # The base slide itself is the last one processed for a given base_idx in reverse.
-        is_base = (base_idx not in processed_bases)
-        processed_bases.add(base_idx)
+        # Any section ending in 2, 3, or 4 is an extra hymn that needs a duplicated slide.
+        # The section ending in 1 (or with no number) is the base template slide.
+        is_extra = section_name.endswith(("2", "3", "4"))
         
-        if not is_base:
-            # It's an extra hymn (e.g. Communion 2, 3, 4).
-            # If no song is selected, just skip creating it.
+        if is_extra:
+            # If no song is selected for this extra slot, just skip it.
             if not song.get("lyrics"):
                 continue
             
             # Duplicate the base slide for this extra hymn.
-            # _duplicate_slide inserts immediately AFTER base_idx.
+            # The base slide at base_idx is guaranteed to be pristine (still has {{LYRICS}})
+            # because we process extras BEFORE the base slide itself.
             _duplicate_slide(prs, base_idx)
-            # The newly duplicated slide is at base_idx + 1. Fill it.
+            # _duplicate_slide inserts immediately AFTER base_idx. Fill the new slide.
             _fill_section_slide(prs, base_idx + 1, song)
         else:
-            # It's the primary base slide (e.g. Communion 1).
+            # It's a primary base slide (e.g. Entrance 1, Lord Have Mercy).
             # We always process it even if empty (to clear placeholders).
             _fill_section_slide(prs, base_idx, song)
 
