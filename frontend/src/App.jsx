@@ -178,32 +178,6 @@ function HymnCombobox({ id, hymns, value, onChange }) {
 
       {open && (
         <div className="combobox-panel" role="listbox">
-          <div className="combobox-search-row">
-            <span className="combobox-search-icon"><SearchIcon /></span>
-            <input
-              ref={inputRef}
-              className="combobox-search-input"
-              type="text"
-              placeholder="Search hymns…"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-            />
-          </div>
-
-          <div
-            className={`combobox-option combobox-option--clear ${!value ? 'combobox-option--active' : ''}`}
-            role="option"
-            aria-selected={!value}
-            onMouseDown={() => selectHymn(null)}
-            onTouchEnd={(e) => { e.preventDefault(); selectHymn(null) }}
-          >
-            — None —
-          </div>
-
           <div className="combobox-list">
             {filtered.length === 0
               ? <div className="combobox-empty">No hymns found</div>
@@ -220,6 +194,32 @@ function HymnCombobox({ id, hymns, value, onChange }) {
                   </div>
                 ))
             }
+          </div>
+
+          <div
+            className={`combobox-option combobox-option--clear ${!value ? 'combobox-option--active' : ''}`}
+            role="option"
+            aria-selected={!value}
+            onMouseDown={() => selectHymn(null)}
+            onTouchEnd={(e) => { e.preventDefault(); selectHymn(null) }}
+          >
+            — None —
+          </div>
+
+          <div className="combobox-search-row">
+            <span className="combobox-search-icon"><SearchIcon /></span>
+            <input
+              ref={inputRef}
+              className="combobox-search-input"
+              type="text"
+              placeholder="Search hymns…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+            />
           </div>
         </div>
       )}
