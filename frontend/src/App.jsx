@@ -123,6 +123,7 @@ function HymnCombobox({ id, hymns, value, onChange }) {
   const [panelStyle, setPanelStyle] = useState({})
   const inputRef   = useRef(null)
   const triggerRef = useRef(null)
+  const wrapperRef = useRef(null)
 
   const selected = hymns.find(h => String(h.id) === String(value)) ?? null
 
