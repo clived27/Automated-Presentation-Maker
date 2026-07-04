@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabaseClient'
 import './App.css'
 
@@ -23,6 +23,9 @@ const MASS_SECTIONS = [
   'Recessional 1',
   'Recessional 2',
 ]
+
+// These sections auto-include ALL verses with no UI shown
+const AUTO_VERSE_SECTIONS = new Set(['Lord Have Mercy', 'Gloria', 'Holy Holy', 'Proclamation'])
 
 const SECTION_TO_CATEGORY = {
   'Entrance 1':     'entrance',
@@ -51,15 +54,14 @@ const TEMPLATE_URL =
   import.meta.env.VITE_TEMPLATE_URL ||
   'https://wvmxlnwfjtesbppojstu.supabase.co/storage/v1/object/public/templates/standard_template.pptx'
 
-// Always use the standard Vercel api/ folder path — never rely on an env var for this.
 const API_URL = '/api/generate-ppt'
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons
 // ---------------------------------------------------------------------------
 
-const ChevronIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+const ChevronIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="6 9 12 15 18 9" />
   </svg>
 )
@@ -104,36 +106,201 @@ const CheckIcon = () => (
   </svg>
 )
 
+const SearchIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+)
+
+// ---------------------------------------------------------------------------
+// HymnCombobox — searchable dropdown replacing native <select>
+// ---------------------------------------------------------------------------
+
+function HymnCombobox({ id, hymns, value, onChange }) {
+  const [open,       setOpen]       = useState(false)
+  const [query,      setQuery]      = useState('')
+  const inputRef   = useRef(null)
+  const wrapperRef = useRef(null)
+
+  const selected = hymns.find(h => String(h.id) === String(value)) ?? null
+
+  const filtered = query.trim()
+    ? hymns.filter(h => h.name.toLowerCase().includes(query.toLowerCase()))
+    : hymns
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false)
+        setQuery('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('touchstart', handler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('touchstart', handler)
+    }
+  }, [])
+
+  const openDropdown = () => {
+    setOpen(true)
+    setQuery('')
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+    })
+  }
+
+  const selectHymn = (hymn) => {
+    onChange(hymn ? String(hymn.id) : '')
+    setOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <div className="combobox-wrapper" ref={wrapperRef}>
+      <button
+        type="button"
+        id={id}
+        className={`combobox-trigger ${open ? 'combobox-trigger--open' : ''} ${value ? 'combobox-trigger--selected' : ''}`}
+        onClick={openDropdown}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className={`combobox-trigger-text ${!selected ? 'combobox-trigger-text--placeholder' : ''}`}>
+          {selected ? selected.name : '— Select hymn —'}
+        </span>
+        <span className={`combobox-chevron ${open ? 'combobox-chevron--up' : ''}`}>
+          <ChevronIcon />
+        </span>
+      </button>
+
+      {open && (
+        <div className="combobox-panel" role="listbox">
+          <div className="combobox-search-row">
+            <span className="combobox-search-icon"><SearchIcon /></span>
+            <input
+              ref={inputRef}
+              className="combobox-search-input"
+              type="text"
+              placeholder="Search hymns…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+            />
+          </div>
+
+          <div
+            className={`combobox-option combobox-option--clear ${!value ? 'combobox-option--active' : ''}`}
+            role="option"
+            aria-selected={!value}
+            onMouseDown={() => selectHymn(null)}
+            onTouchEnd={(e) => { e.preventDefault(); selectHymn(null) }}
+          >
+            — None —
+          </div>
+
+          <div className="combobox-list">
+            {filtered.length === 0
+              ? <div className="combobox-empty">No hymns found</div>
+              : filtered.map(h => (
+                  <div
+                    key={h.id}
+                    className={`combobox-option ${String(h.id) === String(value) ? 'combobox-option--active' : ''}`}
+                    role="option"
+                    aria-selected={String(h.id) === String(value)}
+                    onMouseDown={() => selectHymn(h)}
+                    onTouchEnd={(e) => { e.preventDefault(); selectHymn(h) }}
+                  >
+                    {h.name}
+                  </div>
+                ))
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// VerseCountDropdown — compact "Up to verse N" selector
+// ---------------------------------------------------------------------------
+
+function VerseCountDropdown({ verseCount, upToVerse, onChange, hasChorus }) {
+  const [open, setOpen] = useState(false)
+  const wrapperRef = useRef(null)
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('touchstart', handler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('touchstart', handler)
+    }
+  }, [])
+
+  if (verseCount === 0) return null
+
+  return (
+    <div className="verse-count-row">
+      <span className="verse-count-label">Verses</span>
+      <div className="verse-count-picker" ref={wrapperRef}>
+        <button
+          type="button"
+          className={`verse-count-trigger ${open ? 'verse-count-trigger--open' : ''}`}
+          onClick={() => setOpen(o => !o)}
+        >
+          <span>{upToVerse}</span>
+          <span className={`combobox-chevron ${open ? 'combobox-chevron--up' : ''}`}><ChevronIcon size={12} /></span>
+        </button>
+        {open && (
+          <div className="verse-count-panel">
+            {Array.from({ length: verseCount }, (_, i) => i + 1).map(n => (
+              <div
+                key={n}
+                className={`verse-count-option ${n === upToVerse ? 'verse-count-option--active' : ''}`}
+                onMouseDown={() => { onChange(n); setOpen(false) }}
+                onTouchEnd={(e) => { e.preventDefault(); onChange(n); setOpen(false) }}
+              >
+                {n}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {hasChorus && <span className="chorus-pill">♪ chorus</span>}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // SectionSelector — one row per Mass part
 // ---------------------------------------------------------------------------
 
-function SectionSelector({ index, name, hymns, hymnId, selectedVerses, onChange }) {
+function SectionSelector({ index, name, hymns, hymnId, upToVerse, onChange }) {
   const filteredHymns = filterHymnsForSection(hymns, name)
   const selectedHymn  = hymns.find(h => String(h.id) === String(hymnId)) ?? null
   const verseCount    = selectedHymn?.verse_count ?? 0
   const hasChorus     = !!(selectedHymn?.chorus?.trim())
+  const isAutoVerse   = AUTO_VERSE_SECTIONS.has(name)
+  const isOptional    = name.endsWith('2') || name.endsWith('3') || name.endsWith('4')
 
-  const handleHymnChange = (e) => {
-    const newId = e.target.value
-    if (!newId) { onChange(name, '', []); return }
-    const hymn      = hymns.find(h => String(h.id) === String(newId))
-    const allVerses = Array.from({ length: hymn?.verse_count ?? 0 }, (_, i) => i + 1)
-    onChange(name, newId, allVerses)
+  const handleHymnChange = (newId) => {
+    if (!newId) { onChange(name, '', 0); return }
+    const hymn = hymns.find(h => String(h.id) === String(newId))
+    onChange(name, newId, hymn?.verse_count ?? 0)
   }
-
-  const handleVerseToggle = (verseNum) => {
-    const next = selectedVerses.includes(verseNum)
-      ? selectedVerses.filter(v => v !== verseNum)
-      : [...selectedVerses, verseNum].sort((a, b) => a - b)
-    onChange(name, hymnId, next)
-  }
-
-  const isOptional = name.endsWith('2') || name.endsWith('3') || name.endsWith('4')
 
   return (
     <div className={`section-row ${hymnId ? 'section-row--active' : ''}`}>
-      {/* Index badge + name */}
       <div className="section-meta">
         <span className="section-index">{String(index + 1).padStart(2, '0')}</span>
         <div style={{ display: 'flex', flexDirection: 'column', marginTop: '-2px' }}>
@@ -142,48 +309,27 @@ function SectionSelector({ index, name, hymns, hymnId, selectedVerses, onChange 
         </div>
       </div>
 
-      {/* Dropdown + verse chips */}
       <div className="section-right">
-        <div className="select-wrapper">
-          <select
-            id={`section-${index}`}
-            className="styled-select"
-            value={hymnId}
-            onChange={handleHymnChange}
-          >
-            <option value="">— Select hymn —</option>
-            {filteredHymns.length === 0
-              ? <option disabled value="">No hymns in this category</option>
-              : filteredHymns.map(h => (
-                  <option key={h.id} value={h.id}>{h.name}</option>
-                ))
-            }
-          </select>
-          <span className="select-chevron"><ChevronIcon /></span>
-        </div>
+        <HymnCombobox
+          id={`section-${index}`}
+          hymns={filteredHymns}
+          value={hymnId}
+          onChange={handleHymnChange}
+        />
 
-        {/* Verse checkboxes */}
-        {hymnId && verseCount > 0 && (
-          <div className="verse-module">
-            <div className="verse-chips">
-              {Array.from({ length: verseCount }, (_, i) => i + 1).map(num => (
-                <label
-                  key={num}
-                  className={`verse-chip ${selectedVerses.includes(num) ? 'verse-chip--on' : ''}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedVerses.includes(num)}
-                    onChange={() => handleVerseToggle(num)}
-                  />
-                  <span>v{num}</span>
-                </label>
-              ))}
-              {hasChorus && (
-                <span className="chorus-pill">♪ chorus</span>
-              )}
-            </div>
+        {hymnId && isAutoVerse && hasChorus && (
+          <div style={{ marginTop: '4px' }}>
+            <span className="chorus-pill">♪ chorus</span>
           </div>
+        )}
+
+        {hymnId && !isAutoVerse && (
+          <VerseCountDropdown
+            verseCount={verseCount}
+            upToVerse={upToVerse}
+            onChange={(n) => onChange(name, hymnId, n)}
+            hasChorus={hasChorus}
+          />
         )}
       </div>
     </div>
@@ -208,13 +354,12 @@ export default function App() {
   })
 
   const [selections, setSelections] = useState(() =>
-    Object.fromEntries(MASS_SECTIONS.map(s => [s, { hymnId: '', verses: [] }]))
+    Object.fromEntries(MASS_SECTIONS.map(s => [s, { hymnId: '', upToVerse: 0 }]))
   )
 
   const [downloading, setDownloading] = useState(false)
   const [statusMsg,   setStatusMsg]   = useState(null)
 
-  // Fetch all hymns on mount
   useEffect(() => {
     supabase
       .from('hymns')
@@ -227,8 +372,8 @@ export default function App() {
       })
   }, [])
 
-  const handleSelectionChange = useCallback((sectionName, hymnId, verses) => {
-    setSelections(prev => ({ ...prev, [sectionName]: { hymnId, verses } }))
+  const handleSelectionChange = useCallback((sectionName, hymnId, upToVerse) => {
+    setSelections(prev => ({ ...prev, [sectionName]: { hymnId, upToVerse } }))
   }, [])
 
   const isSectionVisible = (sectionName) => {
@@ -243,12 +388,17 @@ export default function App() {
 
   const buildSectionsPayload = () =>
     MASS_SECTIONS.map(sectionName => {
-      const { hymnId, verses } = selections[sectionName]
+      const { hymnId, upToVerse } = selections[sectionName]
       const hymn = hymns.find(h => String(h.id) === String(hymnId))
       if (!hymn) return { name: sectionName, song: { title: '', lyrics: [] } }
 
+      const isAuto = AUTO_VERSE_SECTIONS.has(sectionName)
+      const versesToInclude = isAuto
+        ? Array.from({ length: hymn.verse_count ?? 0 }, (_, i) => i + 1)
+        : Array.from({ length: upToVerse }, (_, i) => i + 1)
+
       const selectedLyrics = []
-      for (const verseNum of verses) {
+      for (const verseNum of versesToInclude) {
         const text = hymn[`verse_${verseNum}`]
         if (text?.trim()) selectedLyrics.push({ label: `Verse ${verseNum}`, text: text.trim() })
       }
@@ -298,21 +448,14 @@ export default function App() {
 
   const selectedCount = MASS_SECTIONS.filter(s => selections[s].hymnId !== '').length
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
   return (
     <div className="app">
-
-      {/* ── Header ── */}
       <header className="header">
         <div className="header-eyebrow">Infant Jesus Church</div>
         <h1 className="header-title">Automated PPT<br />Generator</h1>
       </header>
 
       <main className="main">
-
-        {/* ── Status Banner ── */}
         {(statusMsg || hymnsError) && (
           <div className={`banner banner--${hymnsError ? 'error' : statusMsg.type}`}>
             {(hymnsError || statusMsg?.type === 'error') ? <AlertIcon /> : <CheckIcon />}
@@ -320,7 +463,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Date Card ── */}
         <section className="card" aria-label="Mass date">
           <div className="card-header">
             <CalendarIcon />
@@ -340,7 +482,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* ── Hymn Selections Card ── */}
         <section className="card" aria-label="Hymn selections">
           <div className="card-header">
             <MusicIcon />
@@ -365,7 +506,7 @@ export default function App() {
                     name={name}
                     hymns={hymns}
                     hymnId={selections[name].hymnId}
-                    selectedVerses={selections[name].verses}
+                    upToVerse={selections[name].upToVerse}
                     onChange={handleSelectionChange}
                   />
                 ))
@@ -373,7 +514,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* ── Generate Button ── */}
         <div className="action-area">
           <button
             id="generate-ppt-btn"
@@ -397,7 +537,6 @@ export default function App() {
             <p className="action-hint">Select a date and at least one hymn to continue</p>
           )}
         </div>
-
       </main>
 
       <footer className="footer">

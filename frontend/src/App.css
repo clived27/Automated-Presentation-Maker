@@ -281,112 +281,246 @@ body {
 }
 
 /* ============================================================
-   Custom Select
+   Combobox (searchable hymn selector)
    ============================================================ */
-.select-wrapper {
+.combobox-wrapper {
   position: relative;
-  display: flex;
-  align-items: center;
+  width: 100%;
 }
 
-.styled-select {
+.combobox-trigger {
   width: 100%;
-  appearance: none;
-  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   background: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 9px 38px 9px 13px;
+  padding: 9px 12px 9px 13px;
   font-family: var(--font);
   font-size: 14px;
   cursor: pointer;
   outline: none;
+  text-align: left;
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease),
               background 0.2s var(--ease);
 }
 
-.styled-select:focus {
+.combobox-trigger:hover {
+  border-color: #3A3A3A;
+  background: var(--bg-elevated);
+}
+
+.combobox-trigger--open,
+.combobox-trigger:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
   background: var(--bg-elevated);
 }
 
-.styled-select:hover:not(:focus) {
-  border-color: #3A3A3A;
-  background: var(--bg-elevated);
-}
-
-/* Option styling (limited browser support, looks best on macOS) */
-.styled-select option {
-  background: #1C1C1C;
+.combobox-trigger--selected .combobox-trigger-text {
   color: var(--text-primary);
 }
 
-.select-chevron {
-  position: absolute;
-  right: 12px;
-  color: var(--text-muted);
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  transition: color 0.2s;
+.combobox-trigger-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.select-wrapper:focus-within .select-chevron { color: var(--accent); }
+.combobox-trigger-text--placeholder {
+  color: var(--text-muted);
+}
+
+.combobox-chevron {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: transform 0.2s var(--ease), color 0.2s var(--ease);
+}
+
+.combobox-chevron--up {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+.combobox-panel {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(139,92,246,0.08);
+  overflow: hidden;
+  animation: comboboxIn 0.15s var(--ease);
+}
+
+@keyframes comboboxIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.combobox-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.combobox-search-icon {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.combobox-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 0;
+}
+
+.combobox-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.combobox-list {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.combobox-list::-webkit-scrollbar { width: 4px; }
+.combobox-list::-webkit-scrollbar-track { background: transparent; }
+.combobox-list::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.35); border-radius: 99px; }
+
+.combobox-option {
+  padding: 9px 14px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
+}
+
+.combobox-option:hover {
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.combobox-option--active {
+  background: var(--accent-dim);
+  color: var(--text-accent);
+}
+
+.combobox-option--clear {
+  font-size: 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px 14px;
+}
+
+.combobox-empty {
+  padding: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
 
 /* ============================================================
-   Verse Module
+   Verse Count Dropdown
    ============================================================ */
-.verse-module {
-  background: var(--bg-base);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 10px 14px;
+.verse-count-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   animation: fadeIn 0.2s var(--ease);
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
+.verse-count-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
-.verse-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
+.verse-count-picker {
+  position: relative;
 }
 
-.verse-chip {
+.verse-count-trigger {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 5px 12px;
-  border-radius: 20px;
-  border: 1px solid var(--border);
   background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  user-select: none;
-  letter-spacing: 0.02em;
-  transition: all 0.18s var(--ease);
-}
-
-.verse-chip input[type="checkbox"] { display: none; }
-
-.verse-chip:hover {
-  border-color: var(--accent);
-  color: var(--text-primary);
-  background: var(--accent-dim);
-}
-
-.verse-chip--on {
-  background: var(--accent-dim);
-  border-color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-accent);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease);
+  min-width: 52px;
+  justify-content: center;
+}
+
+.verse-count-trigger:hover,
+.verse-count-trigger--open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.verse-count-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 201;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+  min-width: 56px;
+  overflow: hidden;
+  animation: comboboxIn 0.12s var(--ease);
+}
+
+.verse-count-option {
+  padding: 7px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: center;
+  user-select: none;
+  transition: background 0.1s var(--ease), color 0.1s var(--ease);
+}
+
+.verse-count-option:hover {
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.verse-count-option--active {
+  background: var(--accent-dim);
+  color: var(--text-accent);
+  font-weight: 600;
 }
 
 .chorus-pill {
@@ -399,6 +533,11 @@ body {
   border-radius: 20px;
   padding: 4px 11px;
   text-transform: lowercase;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ============================================================
