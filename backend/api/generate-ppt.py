@@ -218,29 +218,33 @@ def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
     verse_text  = _normalise(verse_text)
     chorus_text = _normalise(chorus_text) if chorus_text else ""
 
-    # 2. Compute total printable characters for font-size decision
-    combined    = verse_text + ("\n" + chorus_text if chorus_text else "")
-    total_chars = len(combined.replace("\n", ""))
+    # 2. Estimate total vertical lines the text will occupy on the slide.
+    # A standard text box at 32-36pt holds about 42 characters per line before word wrapping.
+    combined = verse_text + ("\n" + chorus_text if chorus_text else "")
+    estimated_lines = 0
+    for line in combined.split("\n"):
+        if not line:
+            estimated_lines += 1
+        else:
+            estimated_lines += max(1, (len(line) + 42 - 1) // 42)
 
-    # 3. Smart step-down font size (thresholds tuned by user testing)
-    #    < 258 chars  → 36 pt  (comfortable)
-    #    258–367      → 34 pt  (slightly denser)
-    #    368–369      → 32 pt  (boundary zone)
-    #    ≥ 370        → 28 pt  (dense slide)
-    if total_chars >= 370:
+    # 3. Smart step-down font size based on vertical lines
+    if estimated_lines >= 18:
+        font_size = 24
+    elif estimated_lines >= 15:
         font_size = 28
-    elif total_chars >= 368:
+    elif estimated_lines >= 13:
+        font_size = 30
+    elif estimated_lines >= 10:
         font_size = 32
-    elif total_chars >= 258:
-        font_size = 34
     else:
         font_size = 36
 
     # 4. Word wrap — required for all layouts
     text_frame.word_wrap = True
 
-    # 5. Compress margins for long lyrics so text has more room
-    if total_chars > 300:
+    # 5. Compress margins for dense lyrics to give the text box extra room
+    if estimated_lines >= 13:
         text_frame.margin_left   = Emu(45720)   # 0.05"
         text_frame.margin_right  = Emu(45720)
         text_frame.margin_top    = Emu(27432)   # 0.03"
