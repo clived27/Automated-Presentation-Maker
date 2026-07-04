@@ -142,14 +142,25 @@ function HymnCombobox({ id, hymns, value, onChange }) {
       document.removeEventListener('mousedown', handler)
       document.removeEventListener('touchstart', handler)
     }
-  }, [])
+  }, [open])
 
   const openDropdown = () => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+
+    const PANEL_H  = 270
+    const GAP      = 4
+    const spaceBelow = window.innerHeight - rect.bottom
+    const openDown   = spaceBelow >= PANEL_H || spaceBelow >= rect.top
+
+    setPanelStyle(
+      openDown
+        ? { top: rect.bottom + GAP, left: rect.left, width: rect.width }
+        : { bottom: window.innerHeight - rect.top + GAP, left: rect.left, width: rect.width }
+    )
     setOpen(true)
     setQuery('')
-    requestAnimationFrame(() => {
-      inputRef.current?.focus()
-    })
+    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   const selectHymn = (hymn) => {
@@ -158,72 +169,88 @@ function HymnCombobox({ id, hymns, value, onChange }) {
     setQuery('')
   }
 
+  // Portal: render the panel directly on <body> so it's never clipped
+  const panel = open && (
+    <div
+      id="combobox-portal"
+      className="combobox-panel"
+      role="listbox"
+      style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+    >
+      {/* Search bar at top */}
+      <div className="combobox-search-row">
+        <span className="combobox-search-icon"><SearchIcon /></span>
+        <input
+          ref={inputRef}
+          className="combobox-search-input"
+          type="text"
+          placeholder="Search hymns…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+        />
+      </div>
+
+      {/* Hymn list */}
+      <div className="combobox-list">
+        {/* Clear / None */}
+        <div
+          className={`combobox-option combobox-option--clear ${!value ? 'combobox-option--active' : ''}`}
+          role="option"
+          aria-selected={!value}
+          onMouseDown={() => selectHymn(null)}
+          onTouchEnd={(e) => { e.preventDefault(); selectHymn(null) }}
+        >
+          — None —
+        </div>
+
+        {filtered.length === 0
+          ? <div className="combobox-empty">No hymns found</div>
+          : filtered.map(h => (
+              <div
+                key={h.id}
+                className={`combobox-option ${String(h.id) === String(value) ? 'combobox-option--active' : ''}`}
+                role="option"
+                aria-selected={String(h.id) === String(value)}
+                onMouseDown={() => selectHymn(h)}
+                onTouchEnd={(e) => { e.preventDefault(); selectHymn(h) }}
+              >
+                {h.name}
+              </div>
+            ))
+        }
+      </div>
+    </div>
+  )
+
   return (
-    <div className="combobox-wrapper" ref={wrapperRef}>
-      <button
-        type="button"
-        id={id}
-        className={`combobox-trigger ${open ? 'combobox-trigger--open' : ''} ${value ? 'combobox-trigger--selected' : ''}`}
-        onClick={openDropdown}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className={`combobox-trigger-text ${!selected ? 'combobox-trigger-text--placeholder' : ''}`}>
-          {selected ? selected.name : '— Select hymn —'}
-        </span>
-        <span className={`combobox-chevron ${open ? 'combobox-chevron--up' : ''}`}>
+    <>
+      {/* Trigger — styled exactly like the original styled-select */}
+      <div className="select-wrapper" ref={triggerRef}>
+        <button
+          type="button"
+          id={id}
+          className={`styled-select combobox-trigger-btn ${open ? 'combobox-trigger-btn--open' : ''}`}
+          onClick={openDropdown}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          style={{ textAlign: 'left', cursor: 'pointer' }}
+        >
+          <span className={selected ? '' : 'combobox-placeholder'}>
+            {selected ? selected.name : '— Select hymn —'}
+          </span>
+        </button>
+        <span className="select-chevron" style={{ pointerEvents: 'none' }}>
           <ChevronIcon />
         </span>
-      </button>
+      </div>
 
-      {open && (
-        <div className="combobox-panel" role="listbox">
-          <div className="combobox-list">
-            {filtered.length === 0
-              ? <div className="combobox-empty">No hymns found</div>
-              : filtered.map(h => (
-                  <div
-                    key={h.id}
-                    className={`combobox-option ${String(h.id) === String(value) ? 'combobox-option--active' : ''}`}
-                    role="option"
-                    aria-selected={String(h.id) === String(value)}
-                    onMouseDown={() => selectHymn(h)}
-                    onTouchEnd={(e) => { e.preventDefault(); selectHymn(h) }}
-                  >
-                    {h.name}
-                  </div>
-                ))
-            }
-          </div>
-
-          <div
-            className={`combobox-option combobox-option--clear ${!value ? 'combobox-option--active' : ''}`}
-            role="option"
-            aria-selected={!value}
-            onMouseDown={() => selectHymn(null)}
-            onTouchEnd={(e) => { e.preventDefault(); selectHymn(null) }}
-          >
-            — None —
-          </div>
-
-          <div className="combobox-search-row">
-            <span className="combobox-search-icon"><SearchIcon /></span>
-            <input
-              ref={inputRef}
-              className="combobox-search-input"
-              type="text"
-              placeholder="Search hymns…"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-            />
-          </div>
-        </div>
-      )}
-    </div>
+      {/* Portal panel — rendered outside card, never clipped */}
+      {panel}
+    </>
   )
 }
 

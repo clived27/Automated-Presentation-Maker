@@ -281,90 +281,74 @@ body {
 }
 
 /* ============================================================
-   Combobox (searchable hymn selector)
+   Original Select Wrapper (trigger reuses these styles)
    ============================================================ */
-.combobox-wrapper {
+.select-wrapper {
   position: relative;
-  width: 100%;
-}
-
-.combobox-trigger {
-  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+}
+
+.styled-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
   background: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 9px 12px 9px 13px;
+  padding: 9px 38px 9px 13px;
   font-family: var(--font);
   font-size: 14px;
   cursor: pointer;
   outline: none;
-  text-align: left;
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease),
               background 0.2s var(--ease);
 }
 
-.combobox-trigger:hover {
-  border-color: #3A3A3A;
-  background: var(--bg-elevated);
-}
-
-.combobox-trigger--open,
-.combobox-trigger:focus {
+.styled-select:focus,
+.combobox-trigger-btn--open.styled-select {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
   background: var(--bg-elevated);
 }
 
-.combobox-trigger--selected .combobox-trigger-text {
-  color: var(--text-primary);
+.styled-select:hover:not(:focus):not(.combobox-trigger-btn--open) {
+  border-color: #3A3A3A;
+  background: var(--bg-elevated);
 }
 
-.combobox-trigger-text {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.combobox-trigger-text--placeholder {
+.combobox-placeholder {
   color: var(--text-muted);
 }
 
-.combobox-chevron {
+.select-chevron {
+  position: absolute;
+  right: 12px;
   color: var(--text-muted);
+  pointer-events: none;
   display: flex;
   align-items: center;
-  flex-shrink: 0;
-  transition: transform 0.2s var(--ease), color 0.2s var(--ease);
+  transition: color 0.2s;
 }
 
-.combobox-chevron--up {
-  transform: rotate(180deg);
-  color: var(--accent);
-}
+.select-wrapper:focus-within .select-chevron,
+.combobox-trigger-btn--open ~ .select-chevron { color: var(--accent); }
 
+/* ============================================================
+   Combobox Panel (portal — always position:fixed via inline style)
+   ============================================================ */
 .combobox-panel {
-  position: absolute;
-  bottom: calc(100% + 5px);
-  top: auto;
-  left: 0;
-  right: 0;
-  z-index: 200;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 -8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,159,10,0.06);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,159,10,0.06);
   overflow: hidden;
   animation: comboboxIn 0.15s var(--ease);
 }
 
 @keyframes comboboxIn {
-  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -430,8 +414,7 @@ body {
 .combobox-option--clear {
   font-size: 12px;
   color: var(--text-muted);
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: none;
+  border-bottom: 1px solid var(--border-subtle);
   padding: 8px 14px;
 }
 
