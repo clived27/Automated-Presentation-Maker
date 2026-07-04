@@ -120,8 +120,9 @@ const SearchIcon = () => (
 function HymnCombobox({ id, hymns, value, onChange }) {
   const [open,       setOpen]       = useState(false)
   const [query,      setQuery]      = useState('')
+  const [panelStyle, setPanelStyle] = useState({})
   const inputRef   = useRef(null)
-  const wrapperRef = useRef(null)
+  const triggerRef = useRef(null)
 
   const selected = hymns.find(h => String(h.id) === String(value)) ?? null
 
