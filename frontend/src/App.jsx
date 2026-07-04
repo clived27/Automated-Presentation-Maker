@@ -161,7 +161,6 @@ function HymnCombobox({ id, hymns, value, onChange }) {
     )
     setOpen(true)
     setQuery('')
-    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   const selectHymn = (hymn) => {
@@ -228,7 +227,7 @@ function HymnCombobox({ id, hymns, value, onChange }) {
   )
 
   return (
-    <>
+    <div ref={wrapperRef}>
       {/* Trigger — styled exactly like the original styled-select */}
       <div className="select-wrapper" ref={triggerRef}>
         <button
@@ -251,7 +250,7 @@ function HymnCombobox({ id, hymns, value, onChange }) {
 
       {/* Portal panel — rendered outside card, never clipped */}
       {panel}
-    </>
+    </div>
   )
 }
 
@@ -259,7 +258,7 @@ function HymnCombobox({ id, hymns, value, onChange }) {
 // VerseCountDropdown — compact "Up to verse N" selector
 // ---------------------------------------------------------------------------
 
-function VerseCountDropdown({ verseCount, upToVerse, onChange, hasChorus }) {
+function VerseCountDropdown({ verseCount, upToVerse, onChange }) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef(null)
 
@@ -304,7 +303,6 @@ function VerseCountDropdown({ verseCount, upToVerse, onChange, hasChorus }) {
           </div>
         )}
       </div>
-      {hasChorus && <span className="chorus-pill">♪ chorus</span>}
     </div>
   )
 }
@@ -324,7 +322,7 @@ function SectionSelector({ index, name, hymns, hymnId, upToVerse, onChange }) {
   const handleHymnChange = (newId) => {
     if (!newId) { onChange(name, '', 0); return }
     const hymn = hymns.find(h => String(h.id) === String(newId))
-    onChange(name, newId, hymn?.verse_count ?? 0)
+    onChange(name, newId, hymn?.verse_count ? 1 : 0)
   }
 
   return (
@@ -345,18 +343,11 @@ function SectionSelector({ index, name, hymns, hymnId, upToVerse, onChange }) {
           onChange={handleHymnChange}
         />
 
-        {hymnId && isAutoVerse && hasChorus && (
-          <div style={{ marginTop: '4px' }}>
-            <span className="chorus-pill">♪ chorus</span>
-          </div>
-        )}
-
         {hymnId && !isAutoVerse && (
           <VerseCountDropdown
             verseCount={verseCount}
             upToVerse={upToVerse}
             onChange={(n) => onChange(name, hymnId, n)}
-            hasChorus={hasChorus}
           />
         )}
       </div>
