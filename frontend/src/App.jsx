@@ -169,8 +169,10 @@ function HymnCombobox({ id, hymns, value, onChange }) {
     setOpen(false)
     setQuery('')
   }
-
   // Portal: render the panel directly on <body> so it's never clipped
+  // touchStartY tracks scroll vs tap — only select if finger moved < 8px
+  const touchStartY = useRef(0)
+
   const panel = open && (
     <div
       id="combobox-portal"
@@ -203,7 +205,13 @@ function HymnCombobox({ id, hymns, value, onChange }) {
           role="option"
           aria-selected={!value}
           onMouseDown={() => selectHymn(null)}
-          onTouchEnd={(e) => { e.preventDefault(); selectHymn(null) }}
+          onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY }}
+          onTouchEnd={(e) => {
+            if (Math.abs(e.changedTouches[0].clientY - touchStartY.current) < 8) {
+              e.preventDefault()
+              selectHymn(null)
+            }
+          }}
         >
           — None —
         </div>
@@ -217,7 +225,13 @@ function HymnCombobox({ id, hymns, value, onChange }) {
                 role="option"
                 aria-selected={String(h.id) === String(value)}
                 onMouseDown={() => selectHymn(h)}
-                onTouchEnd={(e) => { e.preventDefault(); selectHymn(h) }}
+                onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY }}
+                onTouchEnd={(e) => {
+                  if (Math.abs(e.changedTouches[0].clientY - touchStartY.current) < 8) {
+                    e.preventDefault()
+                    selectHymn(h)
+                  }
+                }}
               >
                 {h.name}
               </div>
@@ -260,12 +274,18 @@ function HymnCombobox({ id, hymns, value, onChange }) {
 // ---------------------------------------------------------------------------
 
 function VerseCountDropdown({ verseCount, upToVerse, onChange }) {
-  const [open, setOpen] = useState(false)
-  const wrapperRef = useRef(null)
+  const [open,       setOpen]      = useState(false)
+  const [panelStyle, setPanelStyle] = useState({})
+  const triggerRef = useRef(null)
 
+  // Close when clicking/tapping outside
   useEffect(() => {
+    if (!open) return
     const handler = (e) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false)
+      if (!triggerRef.current?.contains(e.target) &&
+          !document.getElementById('verse-count-portal')?.contains(e.target)) {
+        setOpen(false)
+      }
     }
     document.addEventListener('mousedown', handler)
     document.addEventListener('touchstart', handler)
@@ -273,37 +293,66 @@ function VerseCountDropdown({ verseCount, upToVerse, onChange }) {
       document.removeEventListener('mousedown', handler)
       document.removeEventListener('touchstart', handler)
     }
-  }, [])
+  }, [open])
 
   if (verseCount === 0) return null
+
+  const openPicker = () => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const PANEL_H  = verseCount * 36 + 8
+    const GAP      = 4
+    const spaceBelow = window.innerHeight - rect.bottom
+    const openDown   = spaceBelow >= PANEL_H || spaceBelow >= rect.top
+    setPanelStyle(
+      openDown
+        ? { top: rect.bottom + GAP, left: rect.left, width: rect.width }
+        : { bottom: window.innerHeight - rect.top + GAP, left: rect.left, width: rect.width }
+    )
+    setOpen(o => !o)
+  }
+
+  const touchStartY = useRef(0)
 
   return (
     <div className="verse-count-row">
       <span className="verse-count-label">Verses</span>
-      <div className="verse-count-picker" ref={wrapperRef}>
+      <div className="verse-count-picker" ref={triggerRef}>
         <button
           type="button"
           className={`verse-count-trigger ${open ? 'verse-count-trigger--open' : ''}`}
-          onClick={() => setOpen(o => !o)}
+          onClick={openPicker}
         >
           <span>{upToVerse}</span>
           <span className={`combobox-chevron ${open ? 'combobox-chevron--up' : ''}`}><ChevronIcon size={12} /></span>
         </button>
-        {open && (
-          <div className="verse-count-panel">
-            {Array.from({ length: verseCount }, (_, i) => i + 1).map(n => (
-              <div
-                key={n}
-                className={`verse-count-option ${n === upToVerse ? 'verse-count-option--active' : ''}`}
-                onMouseDown={() => { onChange(n); setOpen(false) }}
-                onTouchEnd={(e) => { e.preventDefault(); onChange(n); setOpen(false) }}
-              >
-                {n}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
+      {open && (
+        <div
+          id="verse-count-portal"
+          className="verse-count-panel"
+          style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+        >
+          {Array.from({ length: verseCount }, (_, i) => i + 1).map(n => (
+            <div
+              key={n}
+              className={`verse-count-option ${n === upToVerse ? 'verse-count-option--active' : ''}`}
+              onMouseDown={() => { onChange(n); setOpen(false) }}
+              onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY }}
+              onTouchEnd={(e) => {
+                if (Math.abs(e.changedTouches[0].clientY - touchStartY.current) < 8) {
+                  e.preventDefault()
+                  onChange(n)
+                  setOpen(false)
+                }
+              }}
+            >
+              {n}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
