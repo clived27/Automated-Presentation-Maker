@@ -56,6 +56,11 @@ const TEMPLATE_URL =
 
 const API_URL = '/api/generate-ppt'
 
+const CATEGORY_OPTIONS = [
+  'entrance', 'lord have mercy', 'gloria', 'acclamation',
+  'offertory', 'holy holy', 'proclamation', 'communion', 'recessional',
+]
+
 // ---------------------------------------------------------------------------
 // Inline SVG icons
 // ---------------------------------------------------------------------------
@@ -110,6 +115,20 @@ const SearchIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8" />
     <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+)
+
+const PlusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+)
+
+const CloseIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 )
 
@@ -169,7 +188,7 @@ function HymnCombobox({ id, hymns, value, onChange }) {
     setOpen(false)
     setQuery('')
   }
-  // Portal: render the panel directly on <body> so it's never clipped
+
   // touchStartY tracks scroll vs tap — only select if finger moved < 8px
   const touchStartY = useRef(0)
 
@@ -180,7 +199,7 @@ function HymnCombobox({ id, hymns, value, onChange }) {
       role="listbox"
       style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
     >
-      {/* Search bar at top */}
+      {/* Search bar */}
       <div className="combobox-search-row">
         <span className="combobox-search-icon"><SearchIcon /></span>
         <input
@@ -243,7 +262,7 @@ function HymnCombobox({ id, hymns, value, onChange }) {
 
   return (
     <div ref={wrapperRef}>
-      {/* Trigger — styled exactly like the original styled-select */}
+      {/* Trigger — styled like original styled-select */}
       <div className="select-wrapper" ref={triggerRef}>
         <button
           type="button"
@@ -277,8 +296,8 @@ function VerseCountDropdown({ verseCount, upToVerse, onChange }) {
   const [open,       setOpen]      = useState(false)
   const [panelStyle, setPanelStyle] = useState({})
   const triggerRef = useRef(null)
+  const touchStartY = useRef(0)
 
-  // Close when clicking/tapping outside
   useEffect(() => {
     if (!open) return
     const handler = (e) => {
@@ -311,8 +330,6 @@ function VerseCountDropdown({ verseCount, upToVerse, onChange }) {
     )
     setOpen(o => !o)
   }
-
-  const touchStartY = useRef(0)
 
   return (
     <div className="verse-count-row">
@@ -358,6 +375,229 @@ function VerseCountDropdown({ verseCount, upToVerse, onChange }) {
 }
 
 // ---------------------------------------------------------------------------
+// AddHymnModal
+// ---------------------------------------------------------------------------
+
+function AddHymnModal({ onClose, onAdded }) {
+  const [name,         setName]         = useState('')
+  const [category,     setCategory]     = useState('')
+  const [chordLink,    setChordLink]    = useState('')
+  const [chorus,       setChorus]       = useState('')
+  const [chorusBefore, setChorusBefore] = useState(false) // No = false, Yes = true
+  const [verses,       setVerses]       = useState(['', '', ''])
+  const [saving,       setSaving]       = useState(false)
+  const [error,        setError]        = useState(null)
+  const [success,      setSuccess]      = useState(false)
+
+  // Lock body scroll while open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const updateVerse = (idx, val) =>
+    setVerses(prev => prev.map((v, i) => i === idx ? val : v))
+
+  const addVerseField    = () => setVerses(prev => [...prev, ''])
+  const removeVerseField = (idx) => setVerses(prev => prev.filter((_, i) => i !== idx))
+
+  const handleSave = async () => {
+    setError(null)
+    if (!name.trim()) { setError('Hymn name is required.'); return }
+    if (!category)    { setError('Please select a category.'); return }
+
+    const filledVerses = verses.map(v => v.trim())
+    const verseCount   = filledVerses.filter(Boolean).length
+    const chorusText   = chorus.trim()
+
+    const payload = {
+      name:        name.trim(),
+      categories:  category,
+      chord_link:  chordLink.trim() || null,
+      verse_count: verseCount,
+    }
+
+    if (!chorusBefore) {
+      // Standard: chorus stored as-is, verses stored as-is
+      payload.chorus = chorusText
+      filledVerses.forEach((v, i) => {
+        if (i < 5) payload[`verse_${i + 1}`] = v || null
+      })
+    } else {
+      // Chorus-first: chorus column empty; prepend **chorus**\n\n to each verse
+      payload.chorus = ''
+      filledVerses.forEach((v, i) => {
+        if (i < 5) {
+          payload[`verse_${i + 1}`] = v ? `**${chorusText}**\n\n${v}` : null
+        }
+      })
+    }
+
+    setSaving(true)
+    try {
+      const { error: supaErr } = await supabase.from('hymns').insert([payload])
+      if (supaErr) throw new Error(supaErr.message)
+      setSuccess(true)
+      setTimeout(() => { onAdded(); onClose() }, 1200)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Add new hymn">
+
+        {/* Header */}
+        <div className="modal-header">
+          <span className="modal-title">Add New Hymn</span>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+            <CloseIcon />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="modal-body">
+          {error   && <div className="modal-banner modal-banner--error"><AlertIcon /><span>{error}</span></div>}
+          {success && <div className="modal-banner modal-banner--success"><CheckIcon /><span>Hymn saved successfully!</span></div>}
+
+          {/* Name */}
+          <div className="modal-field">
+            <label className="modal-label">HYMN NAME</label>
+            <input
+              className="modal-input"
+              type="text"
+              placeholder="e.g. Here I Am Lord"
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+          </div>
+
+          {/* Category */}
+          <div className="modal-field">
+            <label className="modal-label">CATEGORY</label>
+            <div className="select-wrapper">
+              <select
+                className="styled-select"
+                value={category}
+                onChange={e => setCategory(e.target.value)}
+              >
+                <option value="">— Select category —</option>
+                {CATEGORY_OPTIONS.map(c => (
+                  <option key={c} value={c}>
+                    {c.charAt(0).toUpperCase() + c.slice(1)}
+                  </option>
+                ))}
+              </select>
+              <span className="select-chevron"><ChevronIcon /></span>
+            </div>
+          </div>
+
+          {/* Chord Link */}
+          <div className="modal-field">
+            <label className="modal-label">
+              CHORD SHEET LINK <span className="modal-label-optional">(optional)</span>
+            </label>
+            <input
+              className="modal-input"
+              type="url"
+              placeholder="https://drive.google.com/..."
+              value={chordLink}
+              onChange={e => setChordLink(e.target.value)}
+            />
+          </div>
+
+          {/* Verses */}
+          <div className="modal-field">
+            <label className="modal-label">VERSES</label>
+            {verses.map((v, i) => (
+              <div key={i} className="modal-verse-row">
+                <div className="modal-verse-header">
+                  <span className="modal-verse-num">Verse {i + 1}</span>
+                  {verses.length > 1 && (
+                    <button
+                      type="button"
+                      className="modal-verse-remove"
+                      onClick={() => removeVerseField(i)}
+                      aria-label={`Remove verse ${i + 1}`}
+                    >✕</button>
+                  )}
+                </div>
+                <textarea
+                  className="modal-textarea"
+                  rows={4}
+                  placeholder={`Type verse ${i + 1} lyrics here…`}
+                  value={v}
+                  onChange={e => updateVerse(i, e.target.value)}
+                />
+              </div>
+            ))}
+            {verses.length < 5 && (
+              <button type="button" className="modal-add-verse" onClick={addVerseField}>
+                <PlusIcon /> Add Verse
+              </button>
+            )}
+          </div>
+
+          {/* IS THE CHORUS BEFORE A VERSE? */}
+          <div className="modal-field">
+            <label className="modal-label">IS THE CHORUS BEFORE A VERSE?</label>
+            <p className="modal-helper">
+              (Click Yes if it is sung before the verses, click No if sung after)
+            </p>
+            <div className="modal-toggle-row">
+              <button
+                type="button"
+                className={`modal-toggle-btn ${!chorusBefore ? 'modal-toggle-btn--active' : ''}`}
+                onClick={() => setChorusBefore(false)}
+              >No</button>
+              <button
+                type="button"
+                className={`modal-toggle-btn ${chorusBefore ? 'modal-toggle-btn--active' : ''}`}
+                onClick={() => setChorusBefore(true)}
+              >Yes</button>
+            </div>
+          </div>
+
+          {/* Chorus */}
+          <div className="modal-field">
+            <label className="modal-label">
+              CHORUS <span className="modal-label-optional">(optional)</span>
+            </label>
+            <textarea
+              className="modal-textarea"
+              rows={4}
+              placeholder="Type chorus lyrics here…"
+              value={chorus}
+              onChange={e => setChorus(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="modal-footer">
+          <button type="button" className="modal-cancel" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="button" className="modal-save" onClick={handleSave} disabled={saving || success}>
+            {saving ? <><span className="btn-spinner" /> Saving…</> : 'Save Hymn'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SectionSelector — one row per Mass part
 // ---------------------------------------------------------------------------
 
@@ -365,7 +605,6 @@ function SectionSelector({ index, name, hymns, hymnId, upToVerse, onChange }) {
   const filteredHymns = filterHymnsForSection(hymns, name)
   const selectedHymn  = hymns.find(h => String(h.id) === String(hymnId)) ?? null
   const verseCount    = selectedHymn?.verse_count ?? 0
-  const hasChorus     = !!(selectedHymn?.chorus?.trim())
   const isAutoVerse   = AUTO_VERSE_SECTIONS.has(name)
   const isOptional    = name.endsWith('2') || name.endsWith('3') || name.endsWith('4')
 
@@ -413,6 +652,7 @@ export default function App() {
   const [hymns,        setHymns]        = useState([])
   const [hymnsLoading, setHymnsLoading] = useState(true)
   const [hymnsError,   setHymnsError]   = useState(null)
+  const [showAddHymn,  setShowAddHymn]  = useState(false)
 
   const [date, setDate] = useState(() => {
     const today = new Date()
@@ -429,7 +669,9 @@ export default function App() {
   const [downloading, setDownloading] = useState(false)
   const [statusMsg,   setStatusMsg]   = useState(null)
 
-  useEffect(() => {
+  // Reload hymns list (called after successful insert)
+  const reloadHymns = useCallback(() => {
+    setHymnsLoading(true)
     supabase
       .from('hymns')
       .select('id, name, categories, verse_count, chorus, verse_1, verse_2, verse_3, verse_4, verse_5, chord_link')
@@ -440,6 +682,8 @@ export default function App() {
         setHymns(data ?? [])
       })
   }, [])
+
+  useEffect(() => { reloadHymns() }, [reloadHymns])
 
   const handleSelectionChange = useCallback((sectionName, hymnId, upToVerse) => {
     setSelections(prev => ({ ...prev, [sectionName]: { hymnId, upToVerse } }))
@@ -558,6 +802,14 @@ export default function App() {
             {selectedCount > 0 && (
               <span className="selection-badge">{selectedCount} of {MASS_SECTIONS.length}</span>
             )}
+            <button
+              type="button"
+              className="add-hymn-btn"
+              onClick={() => setShowAddHymn(true)}
+              title="Add a new hymn to the database"
+            >
+              <PlusIcon /> Add Hymn
+            </button>
           </div>
 
           <div className="sections-list">
@@ -611,6 +863,13 @@ export default function App() {
       <footer className="footer">
         Clive Dsilva · Powered by Supabase &amp; python-pptx
       </footer>
+
+      {showAddHymn && (
+        <AddHymnModal
+          onClose={() => setShowAddHymn(false)}
+          onAdded={reloadHymns}
+        />
+      )}
     </div>
   )
 }
