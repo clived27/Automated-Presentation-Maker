@@ -585,17 +585,13 @@ function AddHymnModal({ onClose, onAdded }) {
 // SectionSelector — one row per Mass part
 // ---------------------------------------------------------------------------
 
-function SectionSelector({ index, name, hymns, hymnId, upToVerse, onChange }) {
+function SectionSelector({ index, name, hymns, hymnId, onChange }) {
   const filteredHymns = filterHymnsForSection(hymns, name)
-  const selectedHymn  = hymns.find(h => String(h.id) === String(hymnId)) ?? null
-  const verseCount    = selectedHymn?.verse_count ?? 0
-  const isAutoVerse   = AUTO_VERSE_SECTIONS.has(name)
   const isOptional    = name.endsWith('2') || name.endsWith('3') || name.endsWith('4')
 
   const handleHymnChange = (newId) => {
     if (!newId) { onChange(name, '', 0); return }
-    const hymn = hymns.find(h => String(h.id) === String(newId))
-    onChange(name, newId, hymn?.verse_count ? 1 : 0)
+    onChange(name, newId, 0)
   }
 
   return (
@@ -615,14 +611,6 @@ function SectionSelector({ index, name, hymns, hymnId, upToVerse, onChange }) {
           value={hymnId}
           onChange={handleHymnChange}
         />
-
-        {hymnId && !isAutoVerse && (
-          <VerseCountDropdown
-            verseCount={verseCount}
-            upToVerse={upToVerse}
-            onChange={(n) => onChange(name, hymnId, n)}
-          />
-        )}
       </div>
     </div>
   )
@@ -650,8 +638,10 @@ export default function App() {
     Object.fromEntries(MASS_SECTIONS.map(s => [s, { hymnId: '', upToVerse: 0 }]))
   )
 
-  const [downloading, setDownloading] = useState(false)
-  const [statusMsg,   setStatusMsg]   = useState(null)
+  const [downloading,       setDownloading]       = useState(false)
+  const [statusMsg,         setStatusMsg]         = useState(null)
+  const [templates,         setTemplates]         = useState([])
+  const [selectedTemplate,  setSelectedTemplate]  = useState(null)
 
   // Reload hymns list (called after successful insert)
   const reloadHymns = useCallback(() => {
@@ -669,6 +659,20 @@ export default function App() {
 
   useEffect(() => { reloadHymns() }, [reloadHymns])
 
+  // Fetch templates from Supabase
+  useEffect(() => {
+    supabase
+      .from('templates')
+      .select('id, name, file_url')
+      .order('id', { ascending: true })
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setTemplates(data)
+          setSelectedTemplate(data[0])
+        }
+      })
+  }, [])
+
   const handleSelectionChange = useCallback((sectionName, hymnId, upToVerse) => {
     setSelections(prev => ({ ...prev, [sectionName]: { hymnId, upToVerse } }))
   }, [])
@@ -685,14 +689,12 @@ export default function App() {
 
   const buildSectionsPayload = () =>
     MASS_SECTIONS.map(sectionName => {
-      const { hymnId, upToVerse } = selections[sectionName]
+      const { hymnId } = selections[sectionName]
       const hymn = hymns.find(h => String(h.id) === String(hymnId))
       if (!hymn) return { name: sectionName, song: { title: '', lyrics: [] } }
 
-      const isAuto = AUTO_VERSE_SECTIONS.has(sectionName)
-      const versesToInclude = isAuto
-        ? Array.from({ length: hymn.verse_count ?? 0 }, (_, i) => i + 1)
-        : Array.from({ length: upToVerse }, (_, i) => i + 1)
+      // Always include ALL available verses
+      const versesToInclude = Array.from({ length: hymn.verse_count ?? 0 }, (_, i) => i + 1)
 
       const selectedLyrics = []
       for (const verseNum of versesToInclude) {
@@ -717,7 +719,7 @@ export default function App() {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          template_url: TEMPLATE_URL,
+          template_url: selectedTemplate?.file_url ?? TEMPLATE_URL,
           date:         formatDate(date),
           sections:     buildSectionsPayload(),
         }),
@@ -758,6 +760,29 @@ export default function App() {
             {(hymnsError || statusMsg?.type === 'error') ? <AlertIcon /> : <CheckIcon />}
             <span>{hymnsError ?? statusMsg?.text}</span>
           </div>
+        )}
+
+        {/* Template Selector */}
+        {templates.length > 0 && (
+          <section className="card template-card" aria-label="Template selector">
+            <div className="card-header">
+              <span className="card-label">Select Theme</span>
+            </div>
+            <div className="template-grid">
+              {templates.map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`template-tile ${
+                    selectedTemplate?.id === t.id ? 'template-tile--active' : ''
+                  }`}
+                  onClick={() => setSelectedTemplate(t)}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         <section className="card" aria-label="Mass date">
@@ -811,7 +836,6 @@ export default function App() {
                     name={name}
                     hymns={hymns}
                     hymnId={selections[name].hymnId}
-                    upToVerse={selections[name].upToVerse}
                     onChange={handleSelectionChange}
                   />
                 ))

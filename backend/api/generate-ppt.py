@@ -149,6 +149,41 @@ def _snapshot_rPr(text_frame):
     return None
 
 
+def _snapshot_pPr(text_frame):
+    """
+    Return a stripped <a:pPr> from the first non-empty paragraph in the frame,
+    with bullet-related attributes/children removed so we inherit only spacing
+    and indent but never bullet points.
+    """
+    BULLET_TAGS = {
+        f"{{{_NS}}}buNone",
+        f"{{{_NS}}}buChar",
+        f"{{{_NS}}}buAutoNum",
+        f"{{{_NS}}}buClr",
+        f"{{{_NS}}}buClrTx",
+        f"{{{_NS}}}buFont",
+        f"{{{_NS}}}buFontTx",
+        f"{{{_NS}}}buSzPct",
+        f"{{{_NS}}}buSzPts",
+        f"{{{_NS}}}buSzTx",
+    }
+    BULLET_ATTRS = {"marL", "indent"}   # margin-left / hanging-indent used for bullets
+    for para in text_frame.paragraphs:
+        pPr_el = para._p.find(f"{{{_NS}}}pPr")
+        if pPr_el is not None:
+            pPr = copy.deepcopy(pPr_el)
+            # Remove bullet children
+            for tag in BULLET_TAGS:
+                for child in pPr.findall(tag):
+                    pPr.remove(child)
+            # Remove bullet-indent attributes
+            for attr in BULLET_ATTRS:
+                if attr in pPr.attrib:
+                    del pPr.attrib[attr]
+            return pPr
+    return None
+
+
 def _parse_lines_with_bold(text: str, base_bold: bool = False) -> list[tuple[str, bool]]:
     """
     Split *text* by ``**`` markers (which may span multiple lines) and return
@@ -253,6 +288,19 @@ def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
 
     # 6. Snapshot template run properties before clearing
     saved_rPr = _snapshot_rPr(text_frame)
+    saved_pPr = _snapshot_pPr(text_frame)
+
+    # 6b. Kill any list-level bullet inheritance stored in <a:lstStyle>
+    #     Some templates define bullets there; clearing it ensures our
+    #     per-paragraph <a:buNone/> is always the winner.
+    txBody = text_frame._txBody
+    lst_style = txBody.find(f"{{{_NS}}}lstStyle")
+    if lst_style is not None:
+        txBody.remove(lst_style)
+    # Insert a clean empty lstStyle so PowerPoint doesn't re-inherit from layout
+    clean_lst = etree.SubElement(txBody, f"{{{_NS}}}lstStyle")
+    txBody.remove(clean_lst)
+    txBody.insert(list(txBody).index(txBody.findall(f"{{{_NS}}}p")[0]) if txBody.findall(f"{{{_NS}}}p") else 0, clean_lst)
 
     # 7. Build flat list of (line_text, is_bold) by parsing ** blocks
     #    across the entire text first (handles multi-line bold blocks)
@@ -262,15 +310,22 @@ def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
         lines.extend(_parse_lines_with_bold(chorus_text, base_bold=True))
 
     # 8. Clear existing <a:p> elements
-    txBody = text_frame._txBody
     for p_el in txBody.findall(f"{{{_NS}}}p"):
         txBody.remove(p_el)
 
-    # 9. Rebuild — one <a:p> per line
-    #    Each (non-empty) line may contain multiple <a:r> runs if it has
-    #    inline ** markers that weren't already consumed by block-level parsing.
+    # 9. Rebuild — one <a:p> per line, always with <a:buNone/> so bullets
+    #    are suppressed even when the template text box has bullets enabled.
     for line_text, line_is_bold in lines:
         p_el = etree.SubElement(txBody, f"{{{_NS}}}p")
+
+        # Paragraph properties: carry over spacing/align from template, kill bullets
+        if saved_pPr is not None:
+            pPr = copy.deepcopy(saved_pPr)
+        else:
+            pPr = etree.Element(f"{{{_NS}}}pPr")
+        # Always add buNone — suppresses bullet regardless of template/layout
+        bu_none = etree.SubElement(pPr, f"{{{_NS}}}buNone")
+        p_el.insert(0, pPr)
 
         # Inline ** pass (handles cases like "Verse **word** more verse")
         segments = _parse_lines_with_bold(line_text, base_bold=line_is_bold)
