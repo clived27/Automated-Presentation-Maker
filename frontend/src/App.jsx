@@ -381,7 +381,6 @@ function VerseCountDropdown({ verseCount, upToVerse, onChange }) {
 function AddHymnModal({ onClose, onAdded }) {
   const [name,         setName]         = useState('')
   const [category,     setCategory]     = useState('')
-  const [chordLink,    setChordLink]    = useState('')
   const [chorus,       setChorus]       = useState('')
   const [chorusBefore, setChorusBefore] = useState(false) // No = false, Yes = true
   const [verses,       setVerses]       = useState(['', '', ''])
@@ -420,7 +419,6 @@ function AddHymnModal({ onClose, onAdded }) {
     const payload = {
       name:        name.trim(),
       categories:  category,
-      chord_link:  chordLink.trim() || null,
       verse_count: verseCount,
     }
 
@@ -500,20 +498,6 @@ function AddHymnModal({ onClose, onAdded }) {
               </select>
               <span className="select-chevron"><ChevronIcon /></span>
             </div>
-          </div>
-
-          {/* Chord Link */}
-          <div className="modal-field">
-            <label className="modal-label">
-              CHORD SHEET LINK <span className="modal-label-optional">(optional)</span>
-            </label>
-            <input
-              className="modal-input"
-              type="url"
-              placeholder="https://drive.google.com/..."
-              value={chordLink}
-              onChange={e => setChordLink(e.target.value)}
-            />
           </div>
 
           {/* Verses */}
