@@ -41,6 +41,7 @@ import json
 import io
 import re
 import traceback
+import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
@@ -808,7 +809,8 @@ class handler(BaseHTTPRequestHandler):
             "Content-Type",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
-        self.send_header("Content-Disposition", 'attachment; filename="Mass_Presentation.pptx"')
+        date_str = datetime.date.today().strftime("%d-%m")
+        self.send_header("Content-Disposition", f'attachment; filename="{date_str}.pptx"')
         self.send_header("Content-Length", str(len(data)))
         self._cors_headers()
         self.end_headers()
@@ -843,7 +845,8 @@ class handler(BaseHTTPRequestHandler):
         print(f"[merge-chords] Done — {len(data):,} bytes", flush=True)
         self.send_response(200)
         self.send_header("Content-Type", "application/pdf")
-        self.send_header("Content-Disposition", 'attachment; filename="Mass_Chords.pdf"')
+        date_str = datetime.date.today().strftime("%d-%m")
+        self.send_header("Content-Disposition", f'attachment; filename="{date_str}.pdf"')
         self.send_header("Content-Length", str(len(data)))
         self._cors_headers()
         self.end_headers()
