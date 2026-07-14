@@ -282,6 +282,21 @@ def _set_frame_text(shape, verse_text: str, chorus_text: str = "", force_font_si
     # 4. Word wrap — required for all layouts
     text_frame.word_wrap = True
 
+    # 4b. Enable "Shrink text on overflow" (normAutofit) on the text body.
+    #     The Regular Sunday Mass template has this set in its PPTX file already;
+    #     other templates may not.  By enforcing it here, PowerPoint applies a
+    #     fine-scale correction on top of our font-size estimate, so text never
+    #     overflows even when a template's text box is narrower or shorter.
+    txBody_early = text_frame._txBody
+    bodyPr = txBody_early.find(f"{{{_NS}}}bodyPr")
+    if bodyPr is not None:
+        # Remove any conflicting autofit elements first
+        for tag in ("spAutoFit", "noAutofit", "normAutofit"):
+            for el in bodyPr.findall(f"{{{_NS}}}{tag}"):
+                bodyPr.remove(el)
+        # Add normAutofit = Shrink text on overflow
+        etree.SubElement(bodyPr, f"{{{_NS}}}normAutofit")
+
     # 5. Compress margins for dense lyrics to give the text box extra room
     if force_font_size is None and estimated_lines >= 13:
         text_frame.margin_left   = Emu(45720)   # 0.05"
