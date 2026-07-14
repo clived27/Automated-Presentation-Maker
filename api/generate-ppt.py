@@ -726,7 +726,8 @@ def _generate_dynamic(
     prs: Presentation,
     structure: list,
     section_map: dict,
-    font_size_pt: int,
+    formatting_mode: str = "auto_fit",
+    font_size_pt: int    = 36,
     chars_per_line: int  = _CHARS_PER_LINE,
     lines_per_slide: int = _LINES_PER_SLIDE,
 ):
@@ -736,17 +737,19 @@ def _generate_dynamic(
     inserted for long hymns, keeping all subsequent indices correct.
 
     Prayer slides are baked into the template and are never touched.
+
+    formatting_mode:
+      'auto_fit'    — use _fill_section_slide: auto-shrink font, one slide per
+                       verse with chorus repeated (Infant Jesus style).
+      'fixed_split' — use _fill_section_slide_fixed: 65pt constant font,
+                       text split across duplicate slides (St. Pius style).
     """
     slide_offset = 0
 
     for item in structure:
         item_type = item.get("type")
 
-        if item_type == "cover":
-            # {{DATE}} already replaced in generate_presentation before this call
-            pass
-
-        elif item_type == "prayer":
+        if item_type in ("cover", "prayer"):
             # Baked-in slides — do not modify
             pass
 
@@ -755,13 +758,22 @@ def _generate_dynamic(
             label      = item.get("label", "")
             song       = section_map.get(label.lower(), {})
 
-            slides_used = _fill_section_slide_fixed(
-                prs, actual_idx, song, font_size_pt, chars_per_line, lines_per_slide
-            )
+            if formatting_mode == "fixed_split":
+                slides_used = _fill_section_slide_fixed(
+                    prs, actual_idx, song, font_size_pt, chars_per_line, lines_per_slide
+                )
+            else:  # auto_fit
+                # _fill_section_slide handles verse duplication internally;
+                # count how many verse items there are to track the offset.
+                lyrics      = song.get("lyrics", [])
+                verse_count = sum(1 for it in lyrics if "chorus" not in it.get("label", "").lower() and it.get("text", "").strip())
+                slides_used = max(verse_count, 1)  # at least 1 even for empty slots
+                _fill_section_slide(prs, actual_idx, song)
+
             slide_offset += slides_used - 1
             print(
-                f"[dynamic] '{label}' → slide {actual_idx}  "
-                f"chunks={slides_used}  offset_now={slide_offset}",
+                f"[dynamic/{formatting_mode}] '{label}' → slide {actual_idx}  "
+                f"slides_used={slides_used}  offset_now={slide_offset}",
                 flush=True,
             )
 
@@ -809,6 +821,7 @@ def generate_presentation(
     if structure:
         _generate_dynamic(
             prs, structure, section_map,
+            formatting_mode = formatting_mode,
             font_size_pt    = fixed_font_size,
             chars_per_line  = _CHARS_PER_LINE,
             lines_per_slide = _LINES_PER_SLIDE,
