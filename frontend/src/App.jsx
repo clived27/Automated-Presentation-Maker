@@ -640,6 +640,8 @@ export default function App() {
   const [statusMsg,         setStatusMsg]         = useState(null)
   const [templates,         setTemplates]         = useState([])
   const [selectedTemplate,  setSelectedTemplate]  = useState(null)
+  const [churches,          setChurches]          = useState([])
+  const [selectedChurch,    setSelectedChurch]    = useState(null)
 
   // Reload hymns list (called after successful insert)
   const reloadHymns = useCallback(() => {
@@ -657,43 +659,68 @@ export default function App() {
 
   useEffect(() => { reloadHymns() }, [reloadHymns])
 
+  // Fetch churches
+  useEffect(() => {
+    supabase
+      .from('churches')
+      .select('id, name')
+      .order('id', { ascending: true })
+      .then(({ data }) => {
+        if (data && data.length > 0) setChurches(data)
+      })
+  }, [])
+
   // Fetch templates from Supabase (include new dynamic-layout columns)
   useEffect(() => {
     supabase
       .from('templates')
-      .select('id, name, file_url, structure, formatting_mode, fixed_font_size')
+      .select('id, name, file_url, structure, formatting_mode, fixed_font_size, church_id')
       .order('id', { ascending: true })
       .then(({ data, error }) => {
         if (error) {
-          console.error('[templates] Fetch error (new columns may not exist yet):', error.message)
-          // Fallback: fetch without new columns so tiles still show
+          console.error('[templates] Fetch error:', error.message)
           supabase
             .from('templates')
-            .select('id, name, file_url')
+            .select('id, name, file_url, church_id')
             .order('id', { ascending: true })
             .then(({ data: d2 }) => {
               if (d2 && d2.length > 0) {
                 setTemplates(d2)
-                const def = d2.find(t => t.name.toLowerCase().includes('regular sunday mass')) ?? d2[0]
-                setSelectedTemplate(def)
               }
             })
           return
         }
         if (data && data.length > 0) {
-          console.log('[templates] Loaded:', data.map(t => ({
-            id: t.id, name: t.name,
-            hasStructure: !!t.structure,
-            mode: t.formatting_mode,
-            font: t.fixed_font_size,
-          })))
           setTemplates(data)
-          // Default to Regular Sunday Mass; fall back to first template if not found
-          const def = data.find(t => t.name.toLowerCase().includes('regular sunday mass')) ?? data[0]
-          setSelectedTemplate(def)
         }
       })
   }, [])
+
+  // When churches + templates are both loaded, pick the default church
+  // (the one whose templates contain "Regular Sunday Mass").
+  useEffect(() => {
+    if (churches.length === 0 || templates.length === 0) return
+    const regularTemplate = templates.find(t =>
+      t.name.toLowerCase().includes('regular sunday mass')
+    )
+    if (regularTemplate && regularTemplate.church_id) {
+      const defaultChurch = churches.find(c => c.id === regularTemplate.church_id) ?? churches[0]
+      setSelectedChurch(defaultChurch)
+    } else {
+      setSelectedChurch(churches[0])
+    }
+  }, [churches, templates])
+
+  // When selected church changes, filter templates and pick a default.
+  useEffect(() => {
+    if (!selectedChurch) return
+    const churchTemplates = templates.filter(t => t.church_id === selectedChurch.id)
+    if (churchTemplates.length === 0) return
+    const def = churchTemplates.find(t =>
+      t.name.toLowerCase().includes('regular sunday mass')
+    ) ?? churchTemplates[0]
+    setSelectedTemplate(def)
+  }, [selectedChurch, templates])
 
   // Derive the list of hymn slots from the selected template.
   // Dynamic mode: read from template.structure (only 'hymn' items).
@@ -813,7 +840,6 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="header-eyebrow">Infant Jesus Church</div>
         <h1 className="header-title">Automated PPT<br />Generator</h1>
       </header>
 
@@ -825,25 +851,50 @@ export default function App() {
           </div>
         )}
 
-        {/* Template Selector */}
-        {templates.length > 0 && (
+        {/* Church Selector */}
+        {churches.length > 0 && (
+          <section className="card church-card" aria-label="Church selector">
+            <div className="card-header">
+              <span className="card-label">Select Church</span>
+            </div>
+            <div className="church-grid">
+              {churches.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`church-tile ${
+                    selectedChurch?.id === c.id ? 'church-tile--active' : ''
+                  }`}
+                  onClick={() => setSelectedChurch(c)}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Template Selector — filtered by selected church */}
+        {selectedChurch && templates.filter(t => t.church_id === selectedChurch.id).length > 0 && (
           <section className="card template-card" aria-label="Template selector">
             <div className="card-header">
               <span className="card-label">Select Theme</span>
             </div>
             <div className="template-grid">
-              {templates.map(t => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`template-tile ${
-                    selectedTemplate?.id === t.id ? 'template-tile--active' : ''
-                  }`}
-                  onClick={() => setSelectedTemplate(t)}
-                >
-                  {t.name}
-                </button>
-              ))}
+              {templates
+                .filter(t => t.church_id === selectedChurch.id)
+                .map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`template-tile ${
+                      selectedTemplate?.id === t.id ? 'template-tile--active' : ''
+                    }`}
+                    onClick={() => setSelectedTemplate(t)}
+                  >
+                    {t.name}
+                  </button>
+                ))}
             </div>
           </section>
         )}
