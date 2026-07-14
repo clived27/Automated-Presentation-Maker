@@ -584,13 +584,10 @@ function AddHymnModal({ onClose, onAdded }) {
 // SectionSelector — one row per Mass part
 // ---------------------------------------------------------------------------
 
-function SectionSelector({ index, label, category, isOptional, hymns, hymnId, onChange }) {
+function SectionSelector({ index, label, category, isOptional, hymns, hymnId, verseCount, onHymnChange, onVerseChange }) {
   const filteredHymns = filterHymnsForSection(hymns, category)
-
-  const handleHymnChange = (newId) => {
-    if (!newId) { onChange(label, ''); return }
-    onChange(label, newId)
-  }
+  const selectedHymn  = filteredHymns.find(h => String(h.id) === String(hymnId)) ?? null
+  const maxVerses     = selectedHymn?.verse_count ?? 1
 
   return (
     <div className={`section-row ${hymnId ? 'section-row--active' : ''}`}>
@@ -607,8 +604,21 @@ function SectionSelector({ index, label, category, isOptional, hymns, hymnId, on
           id={`section-${index}`}
           hymns={filteredHymns}
           value={hymnId}
-          onChange={handleHymnChange}
+          onChange={onHymnChange}
         />
+        {/* Verse count dropdown — only shown when a hymn is selected */}
+        {hymnId && (
+          <select
+            className="verse-count-select"
+            value={verseCount}
+            onChange={e => onVerseChange(label, Number(e.target.value))}
+            title="Number of verses to include"
+          >
+            {Array.from({ length: maxVerses }, (_, i) => i + 1).map(n => (
+              <option key={n} value={n}>{n} {n === 1 ? 'verse' : 'verses'}</option>
+            ))}
+          </select>
+        )}
       </div>
     </div>
   )
@@ -732,7 +742,7 @@ export default function App() {
         .map(item => ({
           label:      item.label,
           category:   item.category,
-          isOptional: false,
+          isOptional: item.isOptional ?? false,   // read from structure JSON
         }))
     }
     return MASS_SECTIONS.map(name => ({
@@ -745,42 +755,48 @@ export default function App() {
   // Reset hymn selections whenever the active template changes.
   useEffect(() => {
     setSelections(
-      Object.fromEntries(activeSections.map(s => [s.label, { hymnId: '' }]))
+      Object.fromEntries(activeSections.map(s => [s.label, { hymnId: '', verseCount: 1 }]))
     )
   }, [selectedTemplate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectionChange = useCallback((label, hymnId) => {
-    setSelections(prev => ({ ...prev, [label]: { hymnId } }))
+    setSelections(prev => ({ ...prev, [label]: { ...prev[label], hymnId, verseCount: 1 } }))
   }, [])
 
-  const isSectionVisible = (label) => {
-    // In dynamic mode all hymn slots are always visible
-    if (selectedTemplate?.structure) return true
-    // Legacy mode: optional duplicate sections hide until their primary is filled
-    if (label === 'Entrance 2')    return !!selections['Entrance 1']?.hymnId
-    if (label === 'Offertory 2')   return !!selections['Offertory 1']?.hymnId
-    if (label === 'Communion 4')   return !!selections['Communion 3']?.hymnId
-    if (label === 'Recessional 2') return !!selections['Recessional 1']?.hymnId
-    return true
+  const handleVerseCountChange = useCallback((label, count) => {
+    setSelections(prev => ({ ...prev, [label]: { ...prev[label], verseCount: count } }))
+  }, [])
+
+  const isSectionVisible = (label, index) => {
+    const sec = activeSections[index]
+    if (!sec?.isOptional) return true
+    // Optional section: only show if the PREVIOUS section has a hymn selected
+    const prev = activeSections[index - 1]
+    return prev ? !!selections[prev.label]?.hymnId : true
   }
 
-  const visibleSections = activeSections.filter(sec => isSectionVisible(sec.label))
+  const visibleSections = activeSections.filter((sec, i) => isSectionVisible(sec.label, i))
 
   const buildSectionsPayload = () =>
     activeSections.map(sec => {
-      const hymnId = selections[sec.label]?.hymnId ?? ''
+      const sel    = selections[sec.label] ?? {}
+      const hymnId = sel.hymnId ?? ''
+      const count  = sel.verseCount ?? 1
       const hymn   = hymns.find(h => String(h.id) === String(hymnId))
       if (!hymn) return { name: sec.label, song: { title: '', lyrics: [] } }
 
-      // Always include ALL available verses
-      const versesToInclude = Array.from({ length: hymn.verse_count ?? 0 }, (_, i) => i + 1)
-
+      // Build interleaved verse → chorus → verse → chorus sequence
       const selectedLyrics = []
-      for (const verseNum of versesToInclude) {
-        const text = hymn[`verse_${verseNum}`]
-        if (text?.trim()) selectedLyrics.push({ label: `Verse ${verseNum}`, text: text.trim() })
+      const totalVerses = Math.min(count, hymn.verse_count ?? 0)
+      for (let v = 1; v <= totalVerses; v++) {
+        const text = hymn[`verse_${v}`]
+        if (text?.trim()) {
+          selectedLyrics.push({ label: `Verse ${v}`, text: text.trim() })
+          if (hymn.chorus?.trim()) {
+            selectedLyrics.push({ label: 'Chorus', text: hymn.chorus.trim() })
+          }
+        }
       }
-      if (hymn.chorus?.trim()) selectedLyrics.push({ label: 'Chorus', text: hymn.chorus.trim() })
 
       return { name: sec.label, song: { title: hymn.name, lyrics: selectedLyrics } }
     })
@@ -952,7 +968,9 @@ export default function App() {
                     isOptional={sec.isOptional}
                     hymns={hymns}
                     hymnId={selections[sec.label]?.hymnId ?? ''}
-                    onChange={handleSelectionChange}
+                    verseCount={selections[sec.label]?.verseCount ?? 1}
+                    onHymnChange={handleSelectionChange}
+                    onVerseChange={handleVerseCountChange}
                   />
                 ))
             }
