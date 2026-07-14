@@ -531,13 +531,256 @@ def _fill_section_slide(prs: Presentation, slide_index: int, song: dict):
 
 
 # ---------------------------------------------------------------------------
+# Legacy generation helper (unchanged behaviour for structure=None templates)
+# ---------------------------------------------------------------------------
+
+def _generate_legacy(prs: Presentation, section_map: dict):
+    """
+    Fill slides using the hardcoded SECTIONS_TO_PROCESS list.
+    Processes in reverse so duplicate slides do not shift indices.
+    """
+    for section_name, base_idx in reversed(SECTIONS_TO_PROCESS):
+        song     = section_map.get(section_name.lower(), {})
+        is_extra = section_name.endswith(("2", "3", "4"))
+
+        if is_extra:
+            if not song.get("lyrics"):
+                continue
+            _duplicate_slide(prs, base_idx)
+            _fill_section_slide(prs, base_idx + 1, song)
+        else:
+            _fill_section_slide(prs, base_idx, song)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic generation helpers (for structure-driven templates)
+# ---------------------------------------------------------------------------
+
+# Tunable constants for 65pt fixed-font layout.
+# At 65pt on a typical proportional font in a standard slide text box:
+#   ~22 characters fit per line, ~4 lines fit vertically.
+# Adjust these if the output clips or leaves too much whitespace.
+_CHARS_PER_LINE  = 22
+_LINES_PER_SLIDE = 4
+
+
+def _paginate_text(text: str, chars_per_line: int, lines_per_slide: int) -> list[str]:
+    """
+    Word-wrap *text* to *chars_per_line* and group into slide-sized chunks
+    of *lines_per_slide* physical lines each.
+    Returns a list of strings — one element per slide.
+    """
+    raw_lines = _normalise(text).split("\n")
+    physical: list[str] = []
+
+    for raw in raw_lines:
+        if not raw.strip():
+            physical.append("")          # preserve intentional blank lines
+            continue
+        words   = raw.split()
+        current = ""
+        for word in words:
+            if not current:
+                current = word
+            elif len(current) + 1 + len(word) <= chars_per_line:
+                current += " " + word
+            else:
+                physical.append(current)
+                current = word
+        if current:
+            physical.append(current)
+
+    if not physical:
+        return [""]
+
+    chunks = []
+    for i in range(0, len(physical), lines_per_slide):
+        chunks.append("\n".join(physical[i : i + lines_per_slide]))
+    return chunks
+
+
+def _set_frame_text_fixed(shape, text: str, font_size_pt: int):
+    """
+    Replace a text frame's content with *text* at a fixed *font_size_pt*.
+    No auto-shrink; no separate chorus.  Bold ** markers are still honoured.
+    Bullets are always suppressed (same technique as _set_frame_text).
+    """
+    text_frame = shape.text_frame
+    text = _normalise(text)
+
+    text_frame.word_wrap = True
+    saved_rPr = _snapshot_rPr(text_frame)
+    saved_pPr = _snapshot_pPr(text_frame)
+
+    txBody = text_frame._txBody
+
+    # Clear list-style bullet inheritance
+    lst_style = txBody.find(f"{{{_NS}}}lstStyle")
+    if lst_style is not None:
+        txBody.remove(lst_style)
+    clean_lst = etree.Element(f"{{{_NS}}}lstStyle")
+    existing_p = txBody.findall(f"{{{_NS}}}p")
+    txBody.insert(existing_p[0].getparent().index(existing_p[0]) if existing_p else 0, clean_lst)
+
+    # Clear existing paragraphs
+    for p_el in txBody.findall(f"{{{_NS}}}p"):
+        txBody.remove(p_el)
+
+    lines = _parse_lines_with_bold(text, base_bold=False)
+
+    for line_text, line_is_bold in lines:
+        p_el = etree.SubElement(txBody, f"{{{_NS}}}p")
+
+        pPr = copy.deepcopy(saved_pPr) if saved_pPr is not None else etree.Element(f"{{{_NS}}}pPr")
+        etree.SubElement(pPr, f"{{{_NS}}}buNone")
+        p_el.insert(0, pPr)
+
+        segments = _parse_lines_with_bold(line_text, base_bold=line_is_bold)
+        if not segments:
+            r_el = etree.SubElement(p_el, f"{{{_NS}}}r")
+            r_el.insert(0, _make_rPr(saved_rPr, line_is_bold, font_size_pt))
+            etree.SubElement(r_el, f"{{{_NS}}}t").text = ""
+        else:
+            for seg_text, seg_is_bold in segments:
+                r_el = etree.SubElement(p_el, f"{{{_NS}}}r")
+                r_el.insert(0, _make_rPr(saved_rPr, seg_is_bold, font_size_pt))
+                etree.SubElement(r_el, f"{{{_NS}}}t").text = seg_text
+
+
+def _fill_section_slide_fixed(
+    prs: Presentation,
+    base_slide_index: int,
+    song: dict,
+    font_size_pt: int,
+    chars_per_line: int,
+    lines_per_slide: int,
+) -> int:
+    """
+    Fill a hymn slot using fixed-font pagination.
+    Each lyric block (verse / chorus) is paginated independently;
+    overflow spills onto duplicate slides.
+    Returns the total number of slides consumed.
+    """
+    lyrics = song.get("lyrics", [])
+
+    # Locate the {{LYRICS}} shape on the base slide
+    original_slide   = prs.slides[base_slide_index]
+    lyrics_shape_idx = None
+    for idx, shape in enumerate(original_slide.shapes):
+        if shape.has_text_frame and _frame_contains(shape.text_frame, "{{LYRICS}}"):
+            lyrics_shape_idx = idx
+            break
+
+    if lyrics_shape_idx is None:
+        # No placeholder found — clear and bail
+        for shape in original_slide.shapes:
+            if shape.has_text_frame and _frame_contains(shape.text_frame, "{{LYRICS}}"):
+                _replace_text_in_frame(shape.text_frame, "{{LYRICS}}", "")
+        return 1
+
+    if not lyrics:
+        _replace_text_in_frame(
+            list(original_slide.shapes)[lyrics_shape_idx].text_frame, "{{LYRICS}}", ""
+        )
+        return 1
+
+    # Replace {{TITLE}} on the slide if present
+    title_text = song.get("title", "")
+    for shape in original_slide.shapes:
+        if shape.has_text_frame and _frame_contains(shape.text_frame, "{{TITLE}}"):
+            _replace_text_in_frame(shape.text_frame, "{{TITLE}}", title_text)
+
+    # Paginate each lyric block separately; collect all chunks in order
+    all_chunks: list[str] = []
+    for item in lyrics:
+        text = item.get("text", "").strip()
+        if text:
+            all_chunks.extend(_paginate_text(text, chars_per_line, lines_per_slide))
+
+    if not all_chunks:
+        _replace_text_in_frame(
+            list(original_slide.shapes)[lyrics_shape_idx].text_frame, "{{LYRICS}}", ""
+        )
+        return 1
+
+    # Fill base slide with first chunk
+    shapes_list = list(original_slide.shapes)
+    _set_frame_text_fixed(shapes_list[lyrics_shape_idx], all_chunks[0], font_size_pt)
+
+    # Duplicate for each additional chunk
+    for i, chunk in enumerate(all_chunks[1:], start=1):
+        _duplicate_slide(prs, base_slide_index + i - 1)
+        dup_slide  = prs.slides[base_slide_index + i]
+        dup_shapes = list(dup_slide.shapes)
+        if lyrics_shape_idx < len(dup_shapes):
+            _set_frame_text_fixed(dup_shapes[lyrics_shape_idx], chunk, font_size_pt)
+
+    return len(all_chunks)
+
+
+def _generate_dynamic(
+    prs: Presentation,
+    structure: list,
+    section_map: dict,
+    font_size_pt: int,
+    chars_per_line: int  = _CHARS_PER_LINE,
+    lines_per_slide: int = _LINES_PER_SLIDE,
+):
+    """
+    Process slides in forward order based on the template's structure JSON.
+    Tracks a running slide_offset that grows whenever extra slides are
+    inserted for long hymns, keeping all subsequent indices correct.
+
+    Prayer slides are baked into the template and are never touched.
+    """
+    slide_offset = 0
+
+    for item in structure:
+        item_type = item.get("type")
+
+        if item_type == "cover":
+            # {{DATE}} already replaced in generate_presentation before this call
+            pass
+
+        elif item_type == "prayer":
+            # Baked-in slides — do not modify
+            pass
+
+        elif item_type == "hymn":
+            actual_idx = item["slide_index"] + slide_offset
+            label      = item.get("label", "")
+            song       = section_map.get(label.lower(), {})
+
+            slides_used = _fill_section_slide_fixed(
+                prs, actual_idx, song, font_size_pt, chars_per_line, lines_per_slide
+            )
+            slide_offset += slides_used - 1
+            print(
+                f"[dynamic] '{label}' → slide {actual_idx}  "
+                f"chunks={slides_used}  offset_now={slide_offset}",
+                flush=True,
+            )
+
+
+# ---------------------------------------------------------------------------
 # Core generation
 # ---------------------------------------------------------------------------
 
-def generate_presentation(template_url: str, date: str, sections: list) -> io.BytesIO:
+def generate_presentation(
+    template_url: str,
+    date: str,
+    sections: list,
+    structure: Optional[list]  = None,
+    formatting_mode: str       = "auto_fit",
+    fixed_font_size: int       = 36,
+) -> io.BytesIO:
     """
     Download the PPTX template, fill {{DATE}} and {{LYRICS}} placeholders,
     duplicate slides for multi-verse hymns, and return a BytesIO buffer.
+
+    When *structure* is provided the dynamic engine is used (fixed-split
+    pagination, forward pass with offset tracking).  Otherwise the legacy
+    hardcoded SECTIONS_TO_PROCESS path runs unchanged.
     """
     # 1. Download template entirely into memory (no temp files)
     resp = requests.get(template_url, timeout=30)
@@ -558,29 +801,16 @@ def generate_presentation(template_url: str, date: str, sections: list) -> io.By
         for s in sections
     }
 
-    # 5. Fill each Mass-section slide (process in reverse to safely duplicate slides)
-    for section_name, base_idx in reversed(SECTIONS_TO_PROCESS):
-        song = section_map.get(section_name.lower(), {})
-        
-        # Any section ending in 2, 3, or 4 is an extra hymn that needs a duplicated slide.
-        # The section ending in 1 (or with no number) is the base template slide.
-        is_extra = section_name.endswith(("2", "3", "4"))
-        
-        if is_extra:
-            # If no song is selected for this extra slot, just skip it.
-            if not song.get("lyrics"):
-                continue
-            
-            # Duplicate the base slide for this extra hymn.
-            # The base slide at base_idx is guaranteed to be pristine (still has {{LYRICS}})
-            # because we process extras BEFORE the base slide itself.
-            _duplicate_slide(prs, base_idx)
-            # _duplicate_slide inserts immediately AFTER base_idx. Fill the new slide.
-            _fill_section_slide(prs, base_idx + 1, song)
-        else:
-            # It's a primary base slide (e.g. Entrance 1, Lord Have Mercy).
-            # We always process it even if empty (to clear placeholders).
-            _fill_section_slide(prs, base_idx, song)
+    # 5. Choose processing path
+    if structure:
+        _generate_dynamic(
+            prs, structure, section_map,
+            font_size_pt    = fixed_font_size,
+            chars_per_line  = _CHARS_PER_LINE,
+            lines_per_slide = _LINES_PER_SLIDE,
+        )
+    else:
+        _generate_legacy(prs, section_map)
 
     # 6. Save to in-memory buffer
     output = io.BytesIO()
@@ -833,18 +1063,31 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # ---- Default: generate PPT ----------------------------------------
-        template_url = body.get("template_url", "").strip()
-        date         = body.get("date", "")
-        sections     = body.get("sections", [])
+        template_url    = body.get("template_url", "").strip()
+        date            = body.get("date", "")
+        sections        = body.get("sections", [])
+        structure       = body.get("structure")           # None for legacy templates
+        formatting_mode = body.get("formatting_mode", "auto_fit")
+        fixed_font_size = int(body.get("fixed_font_size", 36))
 
         if not template_url:
             self._send_json_error(400, "Missing required field: template_url")
             return
 
-        print(f"[generate-ppt] date='{date}'  sections={len(sections)}", flush=True)
+        print(
+            f"[generate-ppt] date='{date}'  sections={len(sections)}"
+            f"  mode={formatting_mode}  font={fixed_font_size}pt"
+            f"  dynamic={'yes' if structure else 'no'}",
+            flush=True,
+        )
 
         try:
-            buf = generate_presentation(template_url, date, sections)
+            buf = generate_presentation(
+                template_url, date, sections,
+                structure=structure,
+                formatting_mode=formatting_mode,
+                fixed_font_size=fixed_font_size,
+            )
         except requests.HTTPError as exc:
             msg = f"Failed to download template: {exc}"
             print(f"[generate-ppt] ERROR: {msg}", flush=True)

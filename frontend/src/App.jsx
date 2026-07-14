@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from './supabaseClient'
 import './App.css'
 
@@ -45,10 +45,9 @@ const SECTION_TO_CATEGORY = {
   'Recessional 2':  'recessional',
 }
 
-const filterHymnsForSection = (hymns, sectionName) => {
-  const target = SECTION_TO_CATEGORY[sectionName] ?? sectionName.toLowerCase()
-  return hymns.filter(h => (h.categories ?? '').toLowerCase() === target)
-}
+// Used in legacy mode only
+const filterHymnsForSection = (hymns, category) =>
+  hymns.filter(h => (h.categories ?? '').toLowerCase() === category.toLowerCase())
 
 const TEMPLATE_URL =
   import.meta.env.VITE_TEMPLATE_URL ||
@@ -585,13 +584,12 @@ function AddHymnModal({ onClose, onAdded }) {
 // SectionSelector — one row per Mass part
 // ---------------------------------------------------------------------------
 
-function SectionSelector({ index, name, hymns, hymnId, onChange }) {
-  const filteredHymns = filterHymnsForSection(hymns, name)
-  const isOptional    = name.endsWith('2') || name.endsWith('3') || name.endsWith('4')
+function SectionSelector({ index, label, category, isOptional, hymns, hymnId, onChange }) {
+  const filteredHymns = filterHymnsForSection(hymns, category)
 
   const handleHymnChange = (newId) => {
-    if (!newId) { onChange(name, '', 0); return }
-    onChange(name, newId, 0)
+    if (!newId) { onChange(label, ''); return }
+    onChange(label, newId)
   }
 
   return (
@@ -599,7 +597,7 @@ function SectionSelector({ index, name, hymns, hymnId, onChange }) {
       <div className="section-meta">
         <span className="section-index">{String(index + 1).padStart(2, '0')}</span>
         <div style={{ display: 'flex', flexDirection: 'column', marginTop: '-2px' }}>
-          <span className="section-name">{name}</span>
+          <span className="section-name">{label}</span>
           {isOptional && <span style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.2' }}>(Optional)</span>}
         </div>
       </div>
@@ -635,7 +633,7 @@ export default function App() {
   })
 
   const [selections, setSelections] = useState(() =>
-    Object.fromEntries(MASS_SECTIONS.map(s => [s, { hymnId: '', upToVerse: 0 }]))
+    Object.fromEntries(MASS_SECTIONS.map(s => [s, { hymnId: '' }]))
   )
 
   const [downloading,       setDownloading]       = useState(false)
@@ -659,39 +657,87 @@ export default function App() {
 
   useEffect(() => { reloadHymns() }, [reloadHymns])
 
-  // Fetch templates from Supabase
+  // Fetch templates from Supabase (include new dynamic-layout columns)
   useEffect(() => {
     supabase
       .from('templates')
-      .select('id, name, file_url')
+      .select('id, name, file_url, structure, formatting_mode, fixed_font_size')
       .order('id', { ascending: true })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[templates] Fetch error (new columns may not exist yet):', error.message)
+          // Fallback: fetch without new columns so tiles still show
+          supabase
+            .from('templates')
+            .select('id, name, file_url')
+            .order('id', { ascending: true })
+            .then(({ data: d2 }) => {
+              if (d2 && d2.length > 0) { setTemplates(d2); setSelectedTemplate(d2[0]) }
+            })
+          return
+        }
         if (data && data.length > 0) {
+          console.log('[templates] Loaded:', data.map(t => ({
+            id: t.id, name: t.name,
+            hasStructure: !!t.structure,
+            mode: t.formatting_mode,
+            font: t.fixed_font_size,
+          })))
           setTemplates(data)
           setSelectedTemplate(data[0])
         }
       })
   }, [])
 
-  const handleSelectionChange = useCallback((sectionName, hymnId, upToVerse) => {
-    setSelections(prev => ({ ...prev, [sectionName]: { hymnId, upToVerse } }))
+  // Derive the list of hymn slots from the selected template.
+  // Dynamic mode: read from template.structure (only 'hymn' items).
+  // Legacy mode:  fall back to the hardcoded MASS_SECTIONS list.
+  const activeSections = useMemo(() => {
+    if (selectedTemplate?.structure) {
+      return selectedTemplate.structure
+        .filter(item => item.type === 'hymn')
+        .map(item => ({
+          label:      item.label,
+          category:   item.category,
+          isOptional: false,
+        }))
+    }
+    return MASS_SECTIONS.map(name => ({
+      label:      name,
+      category:   SECTION_TO_CATEGORY[name] ?? name.toLowerCase(),
+      isOptional: name.endsWith('2') || name.endsWith('3') || name.endsWith('4'),
+    }))
+  }, [selectedTemplate])
+
+  // Reset hymn selections whenever the active template changes.
+  useEffect(() => {
+    setSelections(
+      Object.fromEntries(activeSections.map(s => [s.label, { hymnId: '' }]))
+    )
+  }, [selectedTemplate]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectionChange = useCallback((label, hymnId) => {
+    setSelections(prev => ({ ...prev, [label]: { hymnId } }))
   }, [])
 
-  const isSectionVisible = (sectionName) => {
-    if (sectionName === 'Entrance 2')    return !!selections['Entrance 1']?.hymnId
-    if (sectionName === 'Offertory 2')   return !!selections['Offertory 1']?.hymnId
-    if (sectionName === 'Communion 4')   return !!selections['Communion 3']?.hymnId
-    if (sectionName === 'Recessional 2') return !!selections['Recessional 1']?.hymnId
+  const isSectionVisible = (label) => {
+    // In dynamic mode all hymn slots are always visible
+    if (selectedTemplate?.structure) return true
+    // Legacy mode: optional duplicate sections hide until their primary is filled
+    if (label === 'Entrance 2')    return !!selections['Entrance 1']?.hymnId
+    if (label === 'Offertory 2')   return !!selections['Offertory 1']?.hymnId
+    if (label === 'Communion 4')   return !!selections['Communion 3']?.hymnId
+    if (label === 'Recessional 2') return !!selections['Recessional 1']?.hymnId
     return true
   }
 
-  const visibleSections = MASS_SECTIONS.filter(isSectionVisible)
+  const visibleSections = activeSections.filter(sec => isSectionVisible(sec.label))
 
   const buildSectionsPayload = () =>
-    MASS_SECTIONS.map(sectionName => {
-      const { hymnId } = selections[sectionName]
-      const hymn = hymns.find(h => String(h.id) === String(hymnId))
-      if (!hymn) return { name: sectionName, song: { title: '', lyrics: [] } }
+    activeSections.map(sec => {
+      const hymnId = selections[sec.label]?.hymnId ?? ''
+      const hymn   = hymns.find(h => String(h.id) === String(hymnId))
+      if (!hymn) return { name: sec.label, song: { title: '', lyrics: [] } }
 
       // Always include ALL available verses
       const versesToInclude = Array.from({ length: hymn.verse_count ?? 0 }, (_, i) => i + 1)
@@ -703,7 +749,7 @@ export default function App() {
       }
       if (hymn.chorus?.trim()) selectedLyrics.push({ label: 'Chorus', text: hymn.chorus.trim() })
 
-      return { name: sectionName, song: { title: hymn.name, lyrics: selectedLyrics } }
+      return { name: sec.label, song: { title: hymn.name, lyrics: selectedLyrics } }
     })
 
   const formatDate = (isoDate) => {
@@ -714,14 +760,25 @@ export default function App() {
   const handleDownload = async () => {
     setStatusMsg(null)
     setDownloading(true)
+    // Debug: log exactly what we are sending to the backend
+    console.log('[generate] selectedTemplate:', {
+      id:             selectedTemplate?.id,
+      name:           selectedTemplate?.name,
+      hasStructure:   !!selectedTemplate?.structure,
+      formattingMode: selectedTemplate?.formatting_mode,
+      fontSize:       selectedTemplate?.fixed_font_size,
+    })
     try {
       const response = await fetch(API_URL, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          template_url: selectedTemplate?.file_url ?? TEMPLATE_URL,
-          date:         formatDate(date),
-          sections:     buildSectionsPayload(),
+          template_url:    selectedTemplate?.file_url ?? TEMPLATE_URL,
+          date:            formatDate(date),
+          structure:       selectedTemplate?.structure       ?? null,
+          formatting_mode: selectedTemplate?.formatting_mode ?? 'auto_fit',
+          fixed_font_size: selectedTemplate?.fixed_font_size ?? 36,
+          sections:        buildSectionsPayload(),
         }),
       })
       if (!response.ok) {
@@ -743,9 +800,9 @@ export default function App() {
   }
 
   const canDownload = !downloading && !!date &&
-    MASS_SECTIONS.some(s => selections[s].hymnId !== '')
+    visibleSections.some(s => selections[s.label]?.hymnId !== '')
 
-  const selectedCount = MASS_SECTIONS.filter(s => selections[s].hymnId !== '').length
+  const selectedCount = visibleSections.filter(s => selections[s.label]?.hymnId !== '').length
 
   return (
     <div className="app">
@@ -809,7 +866,7 @@ export default function App() {
             <MusicIcon />
             <span className="card-label">Hymn Selections</span>
             {selectedCount > 0 && (
-              <span className="selection-badge">{selectedCount} of {MASS_SECTIONS.length}</span>
+              <span className="selection-badge">{selectedCount} of {visibleSections.length}</span>
             )}
             <button
               type="button"
@@ -829,13 +886,15 @@ export default function App() {
                     <div className="skeleton skeleton--select" />
                   </div>
                 ))
-              : visibleSections.map((name, index) => (
+              : visibleSections.map((sec, index) => (
                   <SectionSelector
-                    key={name}
+                    key={sec.label}
                     index={index}
-                    name={name}
+                    label={sec.label}
+                    category={sec.category}
+                    isOptional={sec.isOptional}
                     hymns={hymns}
-                    hymnId={selections[name].hymnId}
+                    hymnId={selections[sec.label]?.hymnId ?? ''}
                     onChange={handleSelectionChange}
                   />
                 ))
