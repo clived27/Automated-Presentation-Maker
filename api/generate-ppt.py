@@ -233,7 +233,7 @@ def _make_rPr(saved_rPr, is_bold: bool, font_size_pt: Optional[int] = None):
     return rPr
 
 
-def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
+def _set_frame_text(shape, verse_text: str, chorus_text: str = "", force_font_size: Optional[int] = None):
     """
     Replace the entire content of *shape*'s text frame with the supplied
     verse and optional chorus, with:
@@ -243,6 +243,7 @@ def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
       several lines is correctly bolded throughout.
     * **Smart font scaling**: font size steps down based on total character
       count so long lyrics never overflow the text box.
+      When *force_font_size* is set the auto-scaling is bypassed entirely.
     * **Margin compression**: inner padding is tightened for long lyrics to
       give the text box extra room.
     * **Template fidelity**: font face and colour are preserved from the
@@ -264,8 +265,10 @@ def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
         else:
             estimated_lines += max(1, (len(line) + 42 - 1) // 42)
 
-    # 3. Smart step-down font size based on vertical lines
-    if estimated_lines >= 18:
+    # 3. Font size — use forced value or auto step-down
+    if force_font_size is not None:
+        font_size = force_font_size
+    elif estimated_lines >= 18:
         font_size = 24
     elif estimated_lines >= 15:
         font_size = 28
@@ -280,7 +283,7 @@ def _set_frame_text(shape, verse_text: str, chorus_text: str = ""):
     text_frame.word_wrap = True
 
     # 5. Compress margins for dense lyrics to give the text box extra room
-    if estimated_lines >= 13:
+    if force_font_size is None and estimated_lines >= 13:
         text_frame.margin_left   = Emu(45720)   # 0.05"
         text_frame.margin_right  = Emu(45720)
         text_frame.margin_top    = Emu(27432)   # 0.03"
@@ -558,10 +561,10 @@ def _generate_legacy(prs: Presentation, section_map: dict):
 
 # Tunable constants for 65pt fixed-font layout.
 # At 65pt on a typical proportional font in a standard slide text box:
-#   ~22 characters fit per line, ~4 lines fit vertically.
+#   ~25 characters fit per line, ~6 lines fit vertically.
 # Adjust these if the output clips or leaves too much whitespace.
-_CHARS_PER_LINE  = 22
-_LINES_PER_SLIDE = 4
+_CHARS_PER_LINE  = 25
+_LINES_PER_SLIDE = 6
 
 
 def _paginate_text(text: str, chars_per_line: int, lines_per_slide: int) -> list[str]:
@@ -703,9 +706,10 @@ def _fill_section_slide_fixed(
         )
         return 1
 
-    # Fill base slide with first chunk
+    # Fill base slide with first chunk — use _set_frame_text with force_font_size
+    # so bullet suppression is identical to the proven auto-fit path.
     shapes_list = list(original_slide.shapes)
-    _set_frame_text_fixed(shapes_list[lyrics_shape_idx], all_chunks[0], font_size_pt)
+    _set_frame_text(shapes_list[lyrics_shape_idx], all_chunks[0], force_font_size=font_size_pt)
 
     # Duplicate for each additional chunk
     for i, chunk in enumerate(all_chunks[1:], start=1):
@@ -713,7 +717,7 @@ def _fill_section_slide_fixed(
         dup_slide  = prs.slides[base_slide_index + i]
         dup_shapes = list(dup_slide.shapes)
         if lyrics_shape_idx < len(dup_shapes):
-            _set_frame_text_fixed(dup_shapes[lyrics_shape_idx], chunk, font_size_pt)
+            _set_frame_text(dup_shapes[lyrics_shape_idx], chunk, force_font_size=font_size_pt)
 
     return len(all_chunks)
 
