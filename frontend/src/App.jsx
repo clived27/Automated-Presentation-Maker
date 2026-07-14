@@ -672,7 +672,11 @@ export default function App() {
             .select('id, name, file_url')
             .order('id', { ascending: true })
             .then(({ data: d2 }) => {
-              if (d2 && d2.length > 0) { setTemplates(d2); setSelectedTemplate(d2[0]) }
+              if (d2 && d2.length > 0) {
+                setTemplates(d2)
+                const def = d2.find(t => t.name.toLowerCase().includes('regular sunday mass')) ?? d2[0]
+                setSelectedTemplate(def)
+              }
             })
           return
         }
@@ -684,7 +688,9 @@ export default function App() {
             font: t.fixed_font_size,
           })))
           setTemplates(data)
-          setSelectedTemplate(data[0])
+          // Default to Regular Sunday Mass; fall back to first template if not found
+          const def = data.find(t => t.name.toLowerCase().includes('regular sunday mass')) ?? data[0]
+          setSelectedTemplate(def)
         }
       })
   }, [])
