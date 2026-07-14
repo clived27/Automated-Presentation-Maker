@@ -589,6 +589,9 @@ function SectionSelector({ index, label, category, isOptional, hymns, hymnId, ve
   const selectedHymn  = filteredHymns.find(h => String(h.id) === String(hymnId)) ?? null
   const maxVerses     = selectedHymn?.verse_count ?? 1
 
+  // HymnCombobox calls onChange(id) with one arg; we need to pass label too
+  const handleHymnChange = (newId) => onHymnChange(label, newId ?? '')
+
   return (
     <div className={`section-row ${hymnId ? 'section-row--active' : ''}`}>
       <div className="section-meta">
@@ -604,7 +607,7 @@ function SectionSelector({ index, label, category, isOptional, hymns, hymnId, ve
           id={`section-${index}`}
           hymns={filteredHymns}
           value={hymnId}
-          onChange={onHymnChange}
+          onChange={handleHymnChange}
         />
         {/* Verse count dropdown — only shown when a hymn is selected */}
         {hymnId && (
