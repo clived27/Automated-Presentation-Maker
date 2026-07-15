@@ -584,10 +584,16 @@ _LINES_PER_SLIDE = 6
 
 def _paginate_text(text: str, chars_per_line: int, lines_per_slide: int) -> list[str]:
     """
-    Word-wrap *text* to *chars_per_line* and group into slide-sized chunks
-    of *lines_per_slide* physical lines each.
+    Word-wrap *text* to *chars_per_line* and group into slide-sized chunks.
+    Uses BALANCED distribution so no slide ends up with just 1-2 orphan lines.
+
+    Example: 7 lines, lines_per_slide=6
+      Greedy  ->  [6 lines, 1 line]   (bad)
+      Balanced -> [4 lines, 3 lines]  (good)
+
     Returns a list of strings — one element per slide.
     """
+    import math
     raw_lines = _normalise(text).split("\n")
     physical: list[str] = []
 
@@ -611,9 +617,16 @@ def _paginate_text(text: str, chars_per_line: int, lines_per_slide: int) -> list
     if not physical:
         return [""]
 
+    total       = len(physical)
+    num_slides  = math.ceil(total / lines_per_slide)
+    # Distribute lines as evenly as possible across slides.
+    # ceil(total / num_slides) gives the max lines on any slide;
+    # the last slide gets whatever is left (always <= the others).
+    per_slide   = math.ceil(total / num_slides)
+
     chunks = []
-    for i in range(0, len(physical), lines_per_slide):
-        chunks.append("\n".join(physical[i : i + lines_per_slide]))
+    for i in range(0, total, per_slide):
+        chunks.append("\n".join(physical[i : i + per_slide]))
     return chunks
 
 
@@ -622,6 +635,8 @@ def _set_frame_text_fixed(shape, text: str, font_size_pt: int):
     Replace a text frame's content with *text* at a fixed *font_size_pt*.
     No auto-shrink; no separate chorus.  Bold ** markers are still honoured.
     Bullets are always suppressed (same technique as _set_frame_text).
+    normAutofit is enforced so that if the 65pt text slightly overshoots the
+    text box (e.g. Gloria with long words), PowerPoint fine-scales it down.
     """
     text_frame = shape.text_frame
     text = _normalise(text)
@@ -631,6 +646,14 @@ def _set_frame_text_fixed(shape, text: str, font_size_pt: int):
     saved_pPr = _snapshot_pPr(text_frame)
 
     txBody = text_frame._txBody
+
+    # Enable normAutofit (Shrink text on overflow) — same safety net as auto_fit path
+    bodyPr = txBody.find(f"{{{_NS}}}bodyPr")
+    if bodyPr is not None:
+        for tag in ("spAutoFit", "noAutofit", "normAutofit"):
+            for el in bodyPr.findall(f"{{{_NS}}}{tag}"):
+                bodyPr.remove(el)
+        etree.SubElement(bodyPr, f"{{{_NS}}}normAutofit")
 
     # Clear list-style bullet inheritance
     lst_style = txBody.find(f"{{{_NS}}}lstStyle")
