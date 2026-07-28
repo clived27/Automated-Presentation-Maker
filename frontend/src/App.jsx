@@ -448,11 +448,17 @@ function AddHymnModal({ onClose, onAdded }) {
 
     setSaving(true)
     try {
-      const { error: supaErr } = await supabase.from('hymns').insert([payload])
+      const { data, error: supaErr } = await supabase
+        .from('hymns')
+        .insert([payload])
+        .select()
       if (supaErr) throw new Error(supaErr.message)
+      if (!data || data.length === 0) throw new Error('Insert returned no data — check Supabase RLS / column constraints.')
+      console.log('[AddHymn] Saved:', data[0])
       setSuccess(true)
       setTimeout(() => { onAdded(); onClose() }, 1200)
     } catch (err) {
+      console.error('[AddHymn] Save failed:', err.message)
       setError(err.message)
     } finally {
       setSaving(false)
@@ -473,8 +479,6 @@ function AddHymnModal({ onClose, onAdded }) {
 
         {/* Body */}
         <div className="modal-body">
-          {error   && <div className="modal-banner modal-banner--error"><AlertIcon /><span>{error}</span></div>}
-          {success && <div className="modal-banner modal-banner--success"><CheckIcon /><span>Hymn saved successfully!</span></div>}
 
           {/* Name */}
           <div className="modal-field">
@@ -577,6 +581,9 @@ function AddHymnModal({ onClose, onAdded }) {
 
         {/* Footer */}
         <div className="modal-footer">
+          {/* Banners sit here so they're always visible regardless of scroll position */}
+          {error   && <div className="modal-banner modal-banner--error"  style={{marginBottom: '12px'}}><AlertIcon /><span>{error}</span></div>}
+          {success && <div className="modal-banner modal-banner--success" style={{marginBottom: '12px'}}><CheckIcon /><span>Hymn saved successfully!</span></div>}
           <button type="button" className="modal-cancel" onClick={onClose} disabled={saving}>
             Cancel
           </button>
