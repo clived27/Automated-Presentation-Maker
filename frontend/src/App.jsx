@@ -45,9 +45,18 @@ const SECTION_TO_CATEGORY = {
   'Recessional 2':  'recessional',
 }
 
-// Used in legacy mode only
-const filterHymnsForSection = (hymns, category) =>
-  hymns.filter(h => (h.categories ?? '').toLowerCase() === category.toLowerCase())
+// Used in legacy mode only.
+// Entrance, Communion and Recessional share one combined pool so that a
+// hymn filed under any of the three categories is available in all three slots.
+const SHARED_CATEGORIES = new Set(['entrance', 'communion', 'recessional'])
+
+const filterHymnsForSection = (hymns, category) => {
+  const cat = category.toLowerCase()
+  if (SHARED_CATEGORIES.has(cat)) {
+    return hymns.filter(h => SHARED_CATEGORIES.has((h.categories ?? '').toLowerCase()))
+  }
+  return hymns.filter(h => (h.categories ?? '').toLowerCase() === cat)
+}
 
 const TEMPLATE_URL =
   import.meta.env.VITE_TEMPLATE_URL ||
