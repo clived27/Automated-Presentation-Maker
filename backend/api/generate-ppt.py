@@ -783,6 +783,13 @@ def _generate_dynamic(
                        text split across duplicate slides (St. Pius style).
     """
     slide_offset = 0
+    total_slides = len(prs.slides)
+    print(
+        f"[dynamic] START  total_slides={total_slides}  "
+        f"structure_items={len(structure)}  "
+        f"section_map_keys={sorted(section_map.keys())}",
+        flush=True,
+    )
 
     for item in structure:
         item_type = item.get("type")
@@ -795,6 +802,16 @@ def _generate_dynamic(
             actual_idx = item["slide_index"] + slide_offset
             label      = item.get("label", "")
             song       = section_map.get(label.lower(), {})
+
+            # Guard: slide index must be in bounds (template may be shorter than expected)
+            if actual_idx >= len(prs.slides):
+                print(
+                    f"[dynamic] SKIP '{label}' — actual_idx={actual_idx} is out of range "
+                    f"(total slides now={len(prs.slides)}, offset={slide_offset}). "
+                    f"Check that the uploaded template has enough slides.",
+                    flush=True,
+                )
+                continue
 
             if formatting_mode == "fixed_split":
                 slides_used = _fill_section_slide_fixed(
@@ -811,9 +828,12 @@ def _generate_dynamic(
             slide_offset += slides_used - 1
             print(
                 f"[dynamic/{formatting_mode}] '{label}' → slide {actual_idx}  "
-                f"slides_used={slides_used}  offset_now={slide_offset}",
+                f"slides_used={slides_used}  offset_now={slide_offset}  "
+                f"total_slides_now={len(prs.slides)}",
                 flush=True,
             )
+
+    print(f"[dynamic] DONE  final_slide_count={len(prs.slides)}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1123,7 +1143,11 @@ class handler(BaseHTTPRequestHandler):
         sections        = body.get("sections", [])
         structure       = body.get("structure")           # None for legacy templates
         formatting_mode = body.get("formatting_mode", "auto_fit")
-        fixed_font_size = int(body.get("fixed_font_size", 36))
+        # fixed_font_size may arrive as JSON null when the DB column is NULL;
+        # body.get(key, default) returns None (not the default) when key is present
+        # but null, so we guard with `or`.
+        raw_font  = body.get("fixed_font_size")
+        fixed_font_size = int(raw_font) if raw_font is not None else 36
 
         if not template_url:
             self._send_json_error(400, "Missing required field: template_url")
