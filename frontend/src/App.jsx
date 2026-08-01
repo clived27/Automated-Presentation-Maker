@@ -786,15 +786,28 @@ export default function App() {
     setSelections(prev => ({ ...prev, [label]: { ...prev[label], verseCount: count } }))
   }, [])
 
-  const isSectionVisible = (label, index) => {
-    const sec = activeSections[index]
-    if (!sec?.isOptional) return true
-    // Optional section: only show if the PREVIOUS section has a hymn selected
-    const prev = activeSections[index - 1]
-    return prev ? !!selections[prev.label]?.hymnId : true
+  const isSectionVisible = (label) => {
+    // Dynamic mode: respect the isOptional flag stored in the structure JSON.
+    if (selectedTemplate?.structure) {
+      const sec = activeSections.find(s => s.label === label)
+      if (!sec?.isOptional) return true
+      const idx  = activeSections.findIndex(s => s.label === label)
+      const prev = idx > 0 ? activeSections[idx - 1] : null
+      return prev ? !!selections[prev.label]?.hymnId : true
+    }
+
+    // Legacy mode: explicit cascading rules for each optional section.
+    // Each optional slot only reveals when the slot before it has a hymn.
+    if (label === 'Entrance 2')    return !!selections['Entrance 1']?.hymnId
+    if (label === 'Offertory 2')   return !!selections['Offertory 1']?.hymnId
+    if (label === 'Communion 2')   return !!selections['Communion 1']?.hymnId
+    if (label === 'Communion 3')   return !!selections['Communion 2']?.hymnId
+    if (label === 'Communion 4')   return !!selections['Communion 3']?.hymnId
+    if (label === 'Recessional 2') return !!selections['Recessional 1']?.hymnId
+    return true
   }
 
-  const visibleSections = activeSections.filter((sec, i) => isSectionVisible(sec.label, i))
+  const visibleSections = activeSections.filter(sec => isSectionVisible(sec.label))
 
   const buildSectionsPayload = () =>
     activeSections.map(sec => {
