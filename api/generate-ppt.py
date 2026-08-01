@@ -897,7 +897,32 @@ def _generate_dynamic(
             # --------------------------------------------------------------
             # REQUIRED hymn — fill at the fixed slide index from structure JSON
             # --------------------------------------------------------------
-            actual_idx = item["slide_index"] + slide_offset
+            slide_index = item.get("slide_index")
+            if slide_index is None:
+                # Safety net: slide_index is null but isOptional was not set.
+                # Treat as optional and skip if no song chosen; insert if song chosen.
+                lyrics     = song.get("lyrics", [])
+                has_lyrics = any(it.get("text", "").strip() for it in lyrics)
+                if not has_lyrics or last_lyrics_shape_idx is None or next_insert_pos is None:
+                    print(
+                        f"[dynamic] SKIP '{label}' — slide_index is null and no song/reference. "
+                        f"Add isOptional:true to the structure JSON for this slot.",
+                        flush=True,
+                    )
+                    continue
+                slides_inserted = _fill_optional_slide(
+                    prs, next_insert_pos - 1, last_lyrics_shape_idx, song
+                )
+                slide_offset    += slides_inserted
+                next_insert_pos += slides_inserted
+                print(
+                    f"[dynamic] (fallback-optional) '{label}' → inserted {slides_inserted} slide(s)  "
+                    f"offset_now={slide_offset}",
+                    flush=True,
+                )
+                continue
+
+            actual_idx = slide_index + slide_offset
 
             # Guard: slide index must be in bounds
             if actual_idx >= len(prs.slides):
