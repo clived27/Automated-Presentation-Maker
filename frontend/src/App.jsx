@@ -602,8 +602,15 @@ function AddHymnModal({ onClose, onAdded }) {
 
 function SectionSelector({ index, label, category, isOptional, hymns, hymnId, verseCount, onHymnChange, onVerseChange }) {
   const filteredHymns = filterHymnsForSection(hymns, category)
-  const selectedHymn  = filteredHymns.find(h => String(h.id) === String(hymnId)) ?? null
-  const maxVerses     = selectedHymn?.verse_count ?? 1
+  const selectedHymn = filteredHymns.find(h => String(h.id) === String(hymnId)) ?? null
+
+  // Count how many verse fields actually have text — this is more reliable than
+  // the `verse_count` column which can be 0 or null for older/imported hymns.
+  const actualVerseCount = selectedHymn
+    ? ['verse_1', 'verse_2', 'verse_3', 'verse_4', 'verse_5']
+        .filter(k => (selectedHymn[k] ?? '').trim().length > 0).length
+    : 0
+  const maxVerses = Math.max(actualVerseCount, selectedHymn?.verse_count ?? 0, 1)
 
   // HymnCombobox calls onChange(id) with one arg; we need to pass label too
   const handleHymnChange = (newId) => onHymnChange(label, newId ?? '')

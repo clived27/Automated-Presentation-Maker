@@ -514,14 +514,14 @@ def _fill_section_slide(prs: Presentation, slide_index: int, song: dict):
         for shape in shapes_list:
             if shape.has_text_frame and _frame_contains(shape.text_frame, "{{LYRICS}}"):
                 _replace_text_in_frame(shape.text_frame, "{{LYRICS}}", "")
-        return
+        return None  # No usable shape index — optional inserts cannot follow
 
     if not verses:
-        # No lyrics — clear placeholder
+        # No lyrics — clear placeholder but keep shape index for optional followers
         _replace_text_in_frame(
             shapes_list[lyrics_shape_idx].text_frame, "{{LYRICS}}", ""
         )
-        return
+        return lyrics_shape_idx
 
     # --- Fill Verse 1 on the original slide ---
     _set_frame_text(
@@ -546,6 +546,66 @@ def _fill_section_slide(prs: Presentation, slide_index: int, song: dict):
                 verse_text,
                 chorus_text,
             )
+
+    return lyrics_shape_idx  # Returned so optional followers can reuse this shape index
+
+
+# ---------------------------------------------------------------------------
+# Optional-hymn insertion helper  (dynamic templates with isOptional slots)
+# ---------------------------------------------------------------------------
+
+def _fill_optional_slide(
+    prs: Presentation,
+    after_idx: int,
+    lyrics_shape_idx: int,
+    song: dict,
+) -> int:
+    """
+    Insert slides for an optional / extra hymn immediately AFTER *after_idx*.
+
+    Because we duplicate the slide that already sits at *after_idx* (which has
+    the same visual layout as the section template), every prayer or baked-in
+    slide that follows is shifted down automatically — no extra offset maths
+    needed beyond incrementing slide_offset in the caller.
+
+    *lyrics_shape_idx* is the shape-list index of the lyrics text box
+    (returned by _fill_section_slide from the primary hymn above).
+
+    Returns the number of slides inserted (0 when no lyrics are provided).
+    """
+    lyrics      = song.get("lyrics", [])
+    chorus_text = ""
+    verses: list[str] = []
+
+    for item in lyrics:
+        label = item.get("label", "").lower()
+        text  = item.get("text",  "").strip()
+        if "chorus" in label:
+            chorus_text = text
+        elif text:
+            verses.append(text)
+
+    if not verses and chorus_text:
+        verses      = [chorus_text]
+        chorus_text = ""
+
+    if not verses:
+        return 0   # Nothing to insert
+
+    # For each verse: duplicate the slide that currently ends at (after_idx + i),
+    # which grows by 1 per iteration as we keep inserting.
+    slides_inserted = 0
+    for i, verse_text in enumerate(verses):
+        src_pos = after_idx + i        # slide to clone (shifts each iteration)
+        new_pos = after_idx + i + 1    # position of the fresh clone
+        _duplicate_slide(prs, src_pos)
+        new_slide  = prs.slides[new_pos]
+        new_shapes = list(new_slide.shapes)
+        if lyrics_shape_idx < len(new_shapes):
+            _set_frame_text(new_shapes[lyrics_shape_idx], verse_text, chorus_text)
+        slides_inserted += 1
+
+    return slides_inserted
 
 
 # ---------------------------------------------------------------------------
@@ -782,7 +842,10 @@ def _generate_dynamic(
       'fixed_split' — use _fill_section_slide_fixed: 65pt constant font,
                        text split across duplicate slides (St. Pius style).
     """
-    slide_offset = 0
+    slide_offset          = 0
+    last_lyrics_shape_idx = None   # Shape index of lyrics box in the last filled hymn
+    next_insert_pos       = None   # Index just AFTER the last filled hymn's last slide
+
     total_slides = len(prs.slides)
     print(
         f"[dynamic] START  total_slides={total_slides}  "
@@ -792,18 +855,51 @@ def _generate_dynamic(
     )
 
     for item in structure:
-        item_type = item.get("type")
+        item_type   = item.get("type")
+        is_optional = item.get("isOptional", False)
 
         if item_type in ("cover", "prayer"):
             # Baked-in slides — do not modify
             pass
 
         elif item_type == "hymn":
-            actual_idx = item["slide_index"] + slide_offset
-            label      = item.get("label", "")
-            song       = section_map.get(label.lower(), {})
+            label = item.get("label", "")
+            song  = section_map.get(label.lower(), {})
 
-            # Guard: slide index must be in bounds (template may be shorter than expected)
+            # --------------------------------------------------------------
+            # OPTIONAL hymn — INSERT after the previous hymn (no fixed index)
+            # Prayer slides shift down automatically as we insert.
+            # --------------------------------------------------------------
+            if is_optional:
+                lyrics     = song.get("lyrics", [])
+                has_lyrics = any(it.get("text", "").strip() for it in lyrics)
+
+                if not has_lyrics or last_lyrics_shape_idx is None or next_insert_pos is None:
+                    print(
+                        f"[dynamic] SKIP optional '{label}' — "
+                        f"{'no hymn selected' if not has_lyrics else 'no reference slide yet'}",
+                        flush=True,
+                    )
+                    continue
+
+                slides_inserted = _fill_optional_slide(
+                    prs, next_insert_pos - 1, last_lyrics_shape_idx, song
+                )
+                slide_offset    += slides_inserted
+                next_insert_pos += slides_inserted
+                print(
+                    f"[dynamic] optional '{label}' → inserted {slides_inserted} slide(s)  "
+                    f"offset_now={slide_offset}  total_slides_now={len(prs.slides)}",
+                    flush=True,
+                )
+                continue
+
+            # --------------------------------------------------------------
+            # REQUIRED hymn — fill at the fixed slide index from structure JSON
+            # --------------------------------------------------------------
+            actual_idx = item["slide_index"] + slide_offset
+
+            # Guard: slide index must be in bounds
             if actual_idx >= len(prs.slides):
                 print(
                     f"[dynamic] SKIP '{label}' — actual_idx={actual_idx} is out of range "
@@ -814,18 +910,23 @@ def _generate_dynamic(
                 continue
 
             if formatting_mode == "fixed_split":
-                slides_used = _fill_section_slide_fixed(
+                slides_used           = _fill_section_slide_fixed(
                     prs, actual_idx, song, font_size_pt, chars_per_line, lines_per_slide
                 )
+                last_lyrics_shape_idx = None   # fixed_split path doesn't expose idx
             else:  # auto_fit
-                # _fill_section_slide handles verse duplication internally;
-                # count how many verse items there are to track the offset.
                 lyrics      = song.get("lyrics", [])
-                verse_count = sum(1 for it in lyrics if "chorus" not in it.get("label", "").lower() and it.get("text", "").strip())
-                slides_used = max(verse_count, 1)  # at least 1 even for empty slots
-                _fill_section_slide(prs, actual_idx, song)
+                verse_count = sum(
+                    1 for it in lyrics
+                    if "chorus" not in it.get("label", "").lower()
+                    and it.get("text", "").strip()
+                )
+                slides_used           = max(verse_count, 1)
+                returned_idx          = _fill_section_slide(prs, actual_idx, song)
+                last_lyrics_shape_idx = returned_idx   # None if no {{LYRICS}} found
 
-            slide_offset += slides_used - 1
+            next_insert_pos  = actual_idx + slides_used
+            slide_offset    += slides_used - 1
             print(
                 f"[dynamic/{formatting_mode}] '{label}' → slide {actual_idx}  "
                 f"slides_used={slides_used}  offset_now={slide_offset}  "
