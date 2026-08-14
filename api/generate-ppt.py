@@ -1,5 +1,5 @@
 """
-generate-ppt.py
+generate-ppt.py  — v2.1  (optional-hymn insert, null slide_index guard)
 Serverless function: accepts POST with JSON body, downloads a master PPTX
 template, fills placeholders, and returns a binary .pptx download.
 
