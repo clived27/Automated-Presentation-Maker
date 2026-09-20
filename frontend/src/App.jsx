@@ -899,10 +899,34 @@ export default function App() {
       </header>
 
       <main className="main">
-        {(statusMsg || hymnsError) && (
-          <div className={`banner banner--${hymnsError ? 'error' : statusMsg.type}`}>
-            {(hymnsError || statusMsg?.type === 'error') ? <AlertIcon /> : <CheckIcon />}
-            <span>{hymnsError ?? statusMsg?.text}</span>
+        {statusMsg && (
+          <div className={`banner banner--${statusMsg.type}`}>
+            {statusMsg.type === 'error' ? <AlertIcon /> : <CheckIcon />}
+            <span>{statusMsg.text}</span>
+          </div>
+        )}
+        {hymnsError && (
+          <div className="banner banner--error">
+            <AlertIcon />
+            <span>{hymnsError}</span>
+            <button
+              type="button"
+              onClick={() => { setHymnsError(null); reloadHymns() }}
+              style={{
+                marginLeft: 'auto',
+                background: 'none',
+                border: '1px solid var(--color-error)',
+                color: 'var(--color-error)',
+                borderRadius: '6px',
+                padding: '4px 12px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: '600',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Try Again
+            </button>
           </div>
         )}
 

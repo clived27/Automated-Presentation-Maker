@@ -1,15 +1,4 @@
-name,categories,verse_count,chorus,verse_1,verse_2,verse_3,verse_4,verse_5
-"Beautiful in White","Holy Holy",1,,"Holy Holy Holy, Lord God of Hosts\nHeaven and Earth, are Full of Your Glory\n**Hosanna, Hosanna, Hosanna in the highest**\nBlessed is He, He who comes\nIn the name, of the Lord",,,,
-"Holy Holy Holy (G Bm C D)","Holy Holy",1,,"Holy Holy Holy, Lord God of Hosts\nHeaven and Earth, are full of your glory\nHosanna in the Highest\nBlest is He who comes, in the name of the Lord\nHosanna, Hosanna, in the highest(2)",,,,
-"Holy is the Lord (Shuffle)","Holy Holy",1,,"Holy Holy Holy Lord, God of Power and God of Host\nHeaven and the Earth are, full of your Glory\n**Hosanna in the Highest (3)\nHoly is the Lord**\nBlessed, Blessed is the one\nThe one who comes in the Name of God\nBlessed is the one who\nComes in the name of the Lord",,,,
-"Holy Holy Holy (Holy is the Lord)","Holy Holy",1,,"Holy Holy Holy, Lord God of Host\nHeaven Heaven and Earth are\nFull of your Glory\n**Hosanna in the Highest (3)\nHoly is the Lord**\nBlessed Blessed is he who comes\nIn the name of the Lord\nBlessed Blessed is he who comes\nIn the name of God",,,,
-"Lord have mercy on your people gathered here tune","Holy Holy",1,,"Holy Holy Holy Lord and God of Hosts\nEarth and Heaven sing Hosanna in your praise\nHe is blessed who comes in the name of the Lord\nSing Hosanna in the highest Praise the Lord",,,,
-"Oh Holy","Holy Holy",1,,"Oh Holy, Holy, Holy Lord God of Hosts\nHeaven and Earth are full, \nAre full of your Glory\n**Hosanna, Hosanna, Hosanna in the highest**\n\nBlessed is he who comes,\nWho comes in the name of the Lord",,,,
-"On we Go - Waltz","Holy Holy",1,,"Holy Holy Holy, Lord God of Hosts\nHeaven Heaven and Earth are\nFull of your glory \n**Hosanna, Hosanna, in the highest (2)**\nBlessed Blessed is He who comes\nIn the name of the Lord",,,,
-"Praise the Lord","Holy Holy",1,,"Holy Holy Holy Lord\nLord God of Hosts\nHeaven Heaven and earth are full of your Glory\n**Hosanna in the Highest (3)\nPraise the Lord**\nBlessed Blessed he who comes\nIn the name of the Lord\nBlessed Blessed he who comes\nIn the name of God",,,,
-"Save us Saviour (Normal)","Proclamation",1,,"Save us Saviour of the World\nFor by Your cross and resurrection\nYou have set us free",,,,
-"Save us Saviour (Latin Bachata)","Proclamation",1,,"Save us Saviour of the World\nFor by Your cross and resurrection\nYou have set us free",,,,
-"We Proclaim (Waltz)","Proclamation",1,,"We proclaim your death O Lord\nProfess your resurrection\nUntil You come again (2)",,,,
-"We Proclaim (Latin Bachata)","Proclamation",1,,"We proclaim your death O Lord\nAnd profess your resurrection\nUntil you come again",,,,
-"Dying you destroyed our death (Normal)","Proclamation",1,,"Dying You destroyed our death\nRising you restored our Life\nLord Jesus \nCome in glory",,,,
-"Dying you destroyed (Lord Jesus, Lord Jesus)","Proclamation",1,,"Dying you destroyed our death\nRising You restored our Life\nLord Jesus, Lord Jesus\nCome in glory",,,,
+python-pptx>=0.6.23
+requests>=2.31.0
+lxml>=4.9.0
+pypdf>=3.0.0
