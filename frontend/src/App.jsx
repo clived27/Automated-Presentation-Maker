@@ -45,17 +45,19 @@ const SECTION_TO_CATEGORY = {
   'Recessional 2':  'recessional',
 }
 
-// Used in legacy mode only.
-// Entrance, Communion and Recessional share one combined pool so that a
-// hymn filed under any of the three categories is available in all three slots.
-const SHARED_CATEGORIES = new Set(['entrance', 'communion', 'recessional'])
+// Sections that show ONLY hymns whose category matches exactly.
+// Everything else (entrance, offertory, communion, recessional) shows ALL hymns
+// because most hymns have a blank category and are general-purpose.
+const CATEGORY_ONLY_SECTIONS = new Set(['lord have mercy', 'gloria', 'acclamation', 'holy holy', 'proclamation'])
 
 const filterHymnsForSection = (hymns, category) => {
   const cat = category.toLowerCase()
-  if (SHARED_CATEGORIES.has(cat)) {
-    return hymns.filter(h => SHARED_CATEGORIES.has((h.categories ?? '').toLowerCase()))
+  if (CATEGORY_ONLY_SECTIONS.has(cat)) {
+    // Only show hymns explicitly tagged with this category
+    return hymns.filter(h => (h.categories ?? '').toLowerCase() === cat)
   }
-  return hymns.filter(h => (h.categories ?? '').toLowerCase() === cat)
+  // Entrance, Offertory, Communion, Recessional — show every hymn
+  return hymns
 }
 
 const TEMPLATE_URL =
@@ -684,7 +686,7 @@ export default function App() {
     setHymnsLoading(true)
     supabase
       .from('hymns')
-      .select('id, name, categories, verse_count, chorus, verse_1, verse_2, verse_3, verse_4, verse_5, chord_link')
+      .select('id, name, categories, verse_count, chorus, verse_1, verse_2, verse_3, verse_4, verse_5')
       .order('name', { ascending: true })
       .then(({ data, error }) => {
         setHymnsLoading(false)
