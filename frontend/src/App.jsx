@@ -882,7 +882,7 @@ export default function App() {
       const blob = await response.blob()
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
-      a.href = url; a.download = 'Mass_Presentation.pptx'
+      a.href = url; a.download = 'Liturgo_Mass.pptx'
       document.body.appendChild(a); a.click()
       document.body.removeChild(a); URL.revokeObjectURL(url)
       setStatusMsg({ type: 'success', text: 'Presentation generated successfully.' })
@@ -901,7 +901,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1 className="header-title">Automated PPT<br />Generator</h1>
+        <h1 className="header-title">Liturgo</h1>
       </header>
 
       <main className="main">
