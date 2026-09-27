@@ -687,6 +687,14 @@ def _paginate_text(text: str, chars_per_line: int, lines_per_slide: int) -> list
     chunks = []
     for i in range(0, total, per_slide):
         chunks.append("\n".join(physical[i : i + per_slide]))
+
+    # Orphan guard: if the last chunk is only 1 physical line (a single word or
+    # short fragment left over from word-wrapping), absorb it into the previous
+    # chunk.  normAutofit in the text frame will shrink the font slightly to fit.
+    if len(chunks) > 1 and "\n" not in chunks[-1]:
+        chunks[-2] = chunks[-2] + "\n" + chunks[-1]
+        chunks.pop()
+
     return chunks
 
 
@@ -758,8 +766,9 @@ def _fill_section_slide_fixed(
 ) -> int:
     """
     Fill a hymn slot using fixed-font pagination.
-    Each lyric block (verse / chorus) is paginated independently;
-    overflow spills onto duplicate slides.
+    The chorus (if any) is appended to each verse and paginated as one combined
+    block — preventing the chorus from landing alone on its own slide as an
+    orphan.  Overflow spills onto duplicate slides.
     Returns the total number of slides consumed.
     """
     lyrics = song.get("lyrics", [])
@@ -791,12 +800,32 @@ def _fill_section_slide_fixed(
         if shape.has_text_frame and _frame_contains(shape.text_frame, "{{TITLE}}"):
             _replace_text_in_frame(shape.text_frame, "{{TITLE}}", title_text)
 
-    # Paginate each lyric block separately; collect all chunks in order
-    all_chunks: list[str] = []
+    # Separate chorus from verses, then combine chorus into each verse BEFORE
+    # paginating.  Paginating chorus as a standalone item causes it to land on
+    # its own slide, which looks like an orphan line/word when the chorus is
+    # short.  Combining verse + chorus mirrors the behaviour of _fill_section_slide
+    # (auto_fit mode) and keeps the music flowing naturally.
+    chorus_text = ""
+    verse_texts: list[str] = []
     for item in lyrics:
-        text = item.get("text", "").strip()
-        if text:
-            all_chunks.extend(_paginate_text(text, chars_per_line, lines_per_slide))
+        label = item.get("label", "").lower()
+        text  = item.get("text", "").strip()
+        if "chorus" in label:
+            chorus_text = text
+        elif text:
+            verse_texts.append(text)
+
+    # Edge case: only a chorus, no separate verses
+    if not verse_texts and chorus_text:
+        verse_texts = [chorus_text]
+        chorus_text = ""
+
+    # Paginate each verse (+appended chorus) as one combined block
+    all_chunks: list[str] = []
+    for verse_text in verse_texts:
+        combined = verse_text + ("\n\n" + chorus_text if chorus_text else "")
+        all_chunks.extend(_paginate_text(combined, chars_per_line, lines_per_slide))
+
 
     if not all_chunks:
         _replace_text_in_frame(
