@@ -827,8 +827,12 @@ export default function App() {
       if (!hymn) return { name: sec.label, song: { title: '', lyrics: [] } }
 
       // Build interleaved verse → chorus → verse → chorus sequence
+      // Use the actual count of filled verse fields (not hymn.verse_count which can
+      // be 0 or null for older/imported hymns), consistent with SectionSelector.
       const selectedLyrics = []
-      const totalVerses = Math.min(count, hymn.verse_count ?? 0)
+      const actualVerseCount = ['verse_1', 'verse_2', 'verse_3', 'verse_4', 'verse_5']
+        .filter(k => (hymn[k] ?? '').trim().length > 0).length
+      const totalVerses = Math.min(count, actualVerseCount)
       for (let v = 1; v <= totalVerses; v++) {
         const text = hymn[`verse_${v}`]
         if (text?.trim()) {
