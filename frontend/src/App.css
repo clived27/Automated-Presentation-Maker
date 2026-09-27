@@ -1143,3 +1143,28 @@ body {
   pointer-events: none;
 }
 
+/* ============================================================
+   Neon Glow Utilities
+   ============================================================ */
+
+/* White neon — used on the Liturgo header title */
+.neon-white {
+  color: #ffffff;
+  text-shadow:
+    0 0 6px rgba(255, 255, 255, 0.95),
+    0 0 16px rgba(255, 255, 255, 0.75),
+    0 0 34px rgba(200, 200, 255, 0.45),
+    0 0 70px rgba(180, 160, 255, 0.25);
+}
+
+/* Violet neon — used on the footer "Made by" credit */
+.neon-violet {
+  color: #c084fc;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-shadow:
+    0 0 5px rgba(192, 132, 252, 0.95),
+    0 0 14px rgba(168, 85, 247, 0.75),
+    0 0 30px rgba(139, 92, 246, 0.5),
+    0 0 60px rgba(109, 40, 217, 0.3);
+}

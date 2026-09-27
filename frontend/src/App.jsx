@@ -882,7 +882,7 @@ export default function App() {
       const blob = await response.blob()
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
-      a.href = url; a.download = 'Liturgo_Mass.pptx'
+      a.href = url; a.download = 'Mass_PPT.pptx'
       document.body.appendChild(a); a.click()
       document.body.removeChild(a); URL.revokeObjectURL(url)
       setStatusMsg({ type: 'success', text: 'Presentation generated successfully.' })
@@ -901,7 +901,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1 className="header-title">Liturgo</h1>
+        <h1 className="header-title neon-white">Liturgo</h1>
       </header>
 
       <main className="main">
@@ -1072,7 +1072,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        Clive Dsilva · Powered by Supabase &amp; python-pptx
+        <span className="neon-violet">Made by Clive Dsilva</span>
       </footer>
 
       {showAddHymn && (
