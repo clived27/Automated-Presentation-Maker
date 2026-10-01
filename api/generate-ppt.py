@@ -39,6 +39,7 @@ Slide mapping (0-indexed):
 import copy
 import json
 import io
+import os
 import re
 import traceback
 import datetime
@@ -1124,6 +1125,33 @@ def merge_chord_pdfs(sections: list) -> io.BytesIO:
 
 
 # ---------------------------------------------------------------------------
+# Telegram notification helper
+# ---------------------------------------------------------------------------
+
+def _send_telegram(message: str) -> None:
+    """
+    Send *message* to the Telegram chat configured via environment variables.
+    TELEGRAM_BOT_TOKEN  — bot token from @BotFather
+    TELEGRAM_CHAT_ID    — personal chat ID
+
+    Fires silently — a failure here must never break PPT generation.
+    """
+    token   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID",   "").strip()
+    if not token or not chat_id:
+        return  # env vars not configured — skip silently
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            timeout=5,
+        )
+        print("[telegram] Notification sent.", flush=True)
+    except Exception as exc:
+        print(f"[telegram] Failed to send notification: {exc}", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # HTTP handler — Vercel-compatible + local http.server
 # ---------------------------------------------------------------------------
 
@@ -1269,6 +1297,8 @@ class handler(BaseHTTPRequestHandler):
         sections        = body.get("sections", [])
         structure       = body.get("structure")           # None for legacy templates
         formatting_mode = body.get("formatting_mode", "auto_fit")
+        church_name     = body.get("church_name",    "Unknown church")
+        template_name   = body.get("template_name",  "Unknown template")
         # fixed_font_size may arrive as JSON null when the DB column is NULL;
         # body.get(key, default) returns None (not the default) when key is present
         # but null, so we guard with `or`.
@@ -1306,6 +1336,34 @@ class handler(BaseHTTPRequestHandler):
 
         data = buf.read()
         print(f"[generate-ppt] OK — {len(data):,} bytes", flush=True)
+
+        # --- Telegram notification -------------------------------------------
+        try:
+            ist = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+            now = datetime.datetime.now(tz=ist).strftime("%I:%M %p · %d %b %Y")
+
+            # Build hymn list — only sections where a hymn was actually chosen
+            hymn_lines = []
+            for sec in sections:
+                title = sec.get("song", {}).get("title", "").strip()
+                if title:
+                    hymn_lines.append(f"  • {sec.get('name', '')} — {title}")
+
+            hymns_block = "\n".join(hymn_lines) if hymn_lines else "  (none selected)"
+
+            tg_msg = (
+                f"🎯 <b>PPT Generated!</b>\n\n"
+                f"⛪ <b>Church:</b> {church_name}\n"
+                f"🎨 <b>Template:</b> {template_name}\n"
+                f"🗓️ <b>Mass:</b> {date}\n\n"
+                f"🎵 <b>Hymns:</b>\n{hymns_block}\n\n"
+                f"⏰ {now} IST"
+            )
+            _send_telegram(tg_msg)
+        except Exception as tg_exc:
+            print(f"[telegram] Notification error (non-fatal): {tg_exc}", flush=True)
+        # ---------------------------------------------------------------------
+
 
         self.send_response(200)
         self.send_header(

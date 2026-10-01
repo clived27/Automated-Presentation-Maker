@@ -872,6 +872,8 @@ export default function App() {
           structure:       selectedTemplate?.structure       ?? null,
           formatting_mode: selectedTemplate?.formatting_mode ?? 'auto_fit',
           fixed_font_size: selectedTemplate?.fixed_font_size ?? 36,
+          church_name:     selectedChurch?.name   ?? 'Unknown church',
+          template_name:   selectedTemplate?.name ?? 'Unknown template',
           sections:        buildSectionsPayload(),
         }),
       })
