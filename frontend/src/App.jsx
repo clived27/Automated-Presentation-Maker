@@ -618,12 +618,14 @@ function SectionSelector({ index, label, category, isOptional, hymns, hymnId, ve
   const handleHymnChange = (newId) => onHymnChange(label, newId ?? '')
 
   return (
-    <div className={`section-row ${hymnId ? 'section-row--active' : ''}`}>
+    <div className={`section-row ${hymnId ? 'section-row--active' : ''} ${isOptional ? 'section-row--optional' : ''}`}>
       <div className="section-meta">
         <span className="section-index">{String(index + 1).padStart(2, '0')}</span>
-        <div style={{ display: 'flex', flexDirection: 'column', marginTop: '-2px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '-2px' }}>
           <span className="section-name">{label}</span>
-          {isOptional && <span style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.2' }}>(Optional)</span>}
+          {isOptional && (
+            <span className="optional-badge">Optional</span>
+          )}
         </div>
       </div>
 
