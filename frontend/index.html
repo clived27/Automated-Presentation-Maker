@@ -2,23 +2,56 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Favicon / Tab icon: Liturgo logo -->
+    <link rel="icon" type="image/png" href="/liturgo.png" />
+    <link rel="apple-touch-icon" href="/liturgo.png" />
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Liturgo — Instantly generate projection-ready Sunday Mass presentations and choir chord booklets. Select hymns, pick the date, and download a polished PowerPoint in seconds." />
     <meta name="theme-color" content="#863bff" />
 
-    <!-- Open Graph (Facebook / WhatsApp / LinkedIn previews) -->
+    <!-- Primary SEO -->
+    <title>Liturgo — Automated Mass Presentation Generator</title>
+    <meta name="description" content="Liturgo lets you instantly generate projection-ready Sunday Mass PowerPoint presentations and choir chord booklets. Select hymns, pick the date, and download a polished PPT in seconds." />
+    <meta name="keywords" content="ppt generator, automated ppt generator, mass ppt, church ppt, church presentation generator, Sunday Mass PowerPoint, liturgy presentation, hymn slideshow, projection slides, Catholic Mass PPT, choir PPT, worship presentation, church slide generator, liturgo" />
+    <meta name="author" content="Liturgo" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph (WhatsApp, Facebook, LinkedIn previews) -->
     <meta property="og:type"        content="website" />
+    <meta property="og:site_name"   content="Liturgo" />
     <meta property="og:title"       content="Liturgo — Automated Mass Presentation Generator" />
     <meta property="og:description" content="Select hymns for each liturgical section and generate a fully formatted, projection-ready Sunday Mass PowerPoint presentation in seconds." />
-    <meta property="og:image"       content="/favicon.svg" />
+    <meta property="og:image"       content="/liturgo.png" />
+    <meta property="og:image:type"  content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
 
     <!-- Twitter Card -->
-    <meta name="twitter:card"        content="summary" />
+    <meta name="twitter:card"        content="summary_large_image" />
     <meta name="twitter:title"       content="Liturgo — Automated Mass Presentation Generator" />
     <meta name="twitter:description" content="Select hymns for each liturgical section and generate a fully formatted, projection-ready Sunday Mass PowerPoint presentation in seconds." />
+    <meta name="twitter:image"       content="/liturgo.png" />
 
-    <title>Liturgo</title>
+    <!-- Structured Data (Google Rich Results) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Liturgo",
+      "description": "Automated Mass Presentation Generator — create projection-ready Sunday Mass PowerPoint slides and choir chord booklets instantly.",
+      "applicationCategory": "UtilityApplication",
+      "operatingSystem": "Any",
+      "url": "https://liturgo.vercel.app",
+      "logo": "/liturgo.png",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "keywords": "ppt generator, automated ppt generator, mass ppt, church ppt, church presentation, Sunday Mass PowerPoint, liturgy presentation, hymn slideshow"
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
